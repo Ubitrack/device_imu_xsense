@@ -15,6 +15,7 @@ include(cmake/UbitrackConfig)
 # External Libraries (could this be solved with conan dependencies ??)
 
 # OpenGL
+SET(OpenGL_GL_PREFERENCE "GLVND")
 SET(HAVE_OPENGL 0)
 find_package(OpenGL)
 IF(OpenGL_FOUND)

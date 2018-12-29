@@ -23,9 +23,10 @@ target_link_libraries(${UBITRACK_LIBRARY_NAME}
     ${UBITRACK_EXTRA_LIBS}
     )
 
-target_include_directories(${UBITRACK_LIBRARY_NAME} PRIVATE
-  ${realsense_INCLUDE_DIRS}
-  )
+target_include_directories(${UBITRACK_LIBRARY_NAME} PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
+        $<BUILD_INTERFACE:${CONAN_INCLUDE_DIRS_LIBREALSENSE}>
+        PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
 # do not create symlinks to versioned names of component libraries
 set_target_properties(${UBITRACK_LIBRARY_NAME} PROPERTIES NO_SONAME ON)
