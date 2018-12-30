@@ -446,7 +446,77 @@ namespace Ubitrack { namespace Drivers {
     void RealsensePointCloudComponent::handleFrame(Measurement::Timestamp ts, rs2::frame f) {
         if (auto df = f.as<rs2::depth_frame>())
         {
+            if (m_outputPort.isConnected()) {
+                // Declare pointcloud object, for calculating pointclouds and texture mappings
+                rs2::pointcloud pc;
 
+                // Generate the pointcloud and texture mappings
+                rs2::points points = pc.calculate(df);
+
+                // Tell pointcloud object to map to this color frame
+                // @todo: currently no access to the color image .. now sure how to achieve this with the current structure ..
+                // pc.map_to(color);
+
+
+                auto vertices = points.get_vertices();
+
+                Math::Vector3d init_pos(0, 0, 0);
+                boost::shared_ptr < std::vector<Math::Vector3d> > pPointCloud = boost::make_shared< std::vector<Math::Vector3d> >(points.size(), init_pos);
+
+                for (size_t i = 0; i < points.size(); i++) {
+                    Math::Vector3d& p = pPointCloud->at(i);
+
+                    if (vertices[i].z != 0.)
+                    {
+                        p[0] = vertices[i].x;
+                        p[1] = vertices[i].y;
+                        p[2] = vertices[i].z;
+                    } else {
+                        p[0] = p[1] = p[2] = 0.;
+                    }
+                }
+
+                m_outputPort.send(Measurement::PositionList(ts, pPointCloud));
+            }
+
+            if (m_outputDepthmapPort.isConnected()) {
+
+                auto imageFormatProperties = Vision::Image::ImageFormatProperties();
+                switch (f.get_profile().format()) {
+                    case RS2_FORMAT_Z16:
+                        imageFormatProperties.depth = CV_16U;
+                        imageFormatProperties.channels = 1;
+                        imageFormatProperties.matType = CV_16UC1;
+                        imageFormatProperties.bitsPerPixel = 16;
+                        imageFormatProperties.origin = 0;
+                        imageFormatProperties.imageFormat = Vision::Image::DEPTH;
+                        break;
+
+                    default:
+                        UBITRACK_THROW("Realsense frame format is not supported!");
+                }
+
+                int w = df.get_width();
+                int h = df.get_height();
+
+                // need to copy image here.
+                auto image = cv::Mat(cv::Size(w, h), imageFormatProperties.matType, (void*)f.get_data(), cv::Mat::AUTO_STEP).clone();
+
+                boost::shared_ptr< Vision::Image > pDepthImage(new Vision::Image(image));
+                pDepthImage->set_pixelFormat(imageFormatProperties.imageFormat);
+                pDepthImage->set_origin(imageFormatProperties.origin);
+
+                if (m_autoGPUUpload) {
+                    Vision::OpenCLManager &oclManager = Vision::OpenCLManager::singleton();
+                    if (oclManager.isInitialized()) {
+                        //force upload to the GPU
+                        pDepthImage->uMat();
+                    }
+                }
+
+                m_outputDepthmapPort.send(Measurement::ImageMeasurement(ts, pDepthImage));
+
+            }
         }
     }
 

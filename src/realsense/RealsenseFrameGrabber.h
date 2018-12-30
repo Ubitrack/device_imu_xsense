@@ -167,7 +167,7 @@ using namespace Dataflow;
  * Module key for art.
  * Represents the port number on which to listen.
  */
-    MAKE_NODEATTRIBUTEKEY_DEFAULT( RealsenseModuleKey, int, "Camera", "rsSerialNumber", 0 );
+    MAKE_DATAFLOWCONFIGURATIONATTRIBUTEKEY_DEFAULT( RealsenseModuleKey, int, "rsSerialNumber", 0 );
 
 
 /**
@@ -181,43 +181,35 @@ using namespace Dataflow;
 					: m_sensor_type( REALSENSE_SENSOR_VIDEO )
 					, m_stream_type( rs2_stream::RS2_STREAM_COLOR )
 					, m_stream_index ( 0 ) {
-				Graph::UTQLSubgraph::EdgePtr config;
 
 				if (subgraph->m_DataflowClass == "RealsenseCameraCalibration") {
 					m_sensor_type = REALSENSE_SENSOR_CONFIG;
+					// there is only one calibration component per device, therefore we're assuming default values for stream_type and index
 					return;
 				} else if (subgraph->m_DataflowClass == "RealsenseVideoStream") {
 					m_sensor_type = REALSENSE_SENSOR_VIDEO;
-					if (subgraph->hasEdge("ImageOutput"))
-						config = subgraph->getEdge("ImageOutput");
 				} else if (subgraph->m_DataflowClass == "RealsensePointCloud") {
 					m_sensor_type = REALSENSE_SENSOR_DEPTH;
-					if (subgraph->hasEdge("PointCloudOutput"))
-						config = subgraph->getEdge("PointCloudOutput");
 				} else   {
 					UBITRACK_THROW("Realsense Camera: Invalid Component Sensor Type.");
 				}
 
-				if (!config) {
-					UBITRACK_THROW("Realsense Component Pattern has neither \"ImageOutput\" nor \"PointCloudOutput\" edge");
-				}
-
-				if (config->hasAttribute("rsSensorType")) {
-					std::string sSensorType = config->getAttributeString("rsSensorType");
+				if (subgraph->m_DataflowAttributes.hasAttribute("rsSensorType")) {
+					std::string sSensorType = subgraph->m_DataflowAttributes.getAttributeString("rsSensorType");
 					if (realsenseSensorTypeMap.find(sSensorType) == realsenseSensorTypeMap.end())
 						UBITRACK_THROW("unknown sensor type: \"" + sSensorType + "\"");
 					m_sensor_type = realsenseSensorTypeMap[sSensorType];
 				}
 
-				if (config->hasAttribute("rsStreamType")) {
-					std::string sStreamType = config->getAttributeString("rsStreamFormat");
+				if (subgraph->m_DataflowAttributes.hasAttribute("rsStreamType")) {
+					std::string sStreamType = subgraph->m_DataflowAttributes.getAttributeString("rsStreamFormat");
 					if (realsenseStreamTypeMap.find(sStreamType) == realsenseStreamTypeMap.end())
 						UBITRACK_THROW("unknown stream type: \"" + sStreamType + "\"");
 					m_stream_type = realsenseStreamTypeMap[sStreamType];
 				}
 
-				if (config->hasAttribute("rsStreamIndex")) {
-					config->getAttributeData("rsStreamIndex", m_stream_index);
+				if (subgraph->m_DataflowAttributes.hasAttribute("rsStreamIndex")) {
+                    subgraph->m_DataflowAttributes.getAttributeData("rsStreamIndex", m_stream_index);
 				}
 			}
 
@@ -279,33 +271,23 @@ using namespace Dataflow;
                     : Module< RealsenseModuleKey, RealsenseComponentKey, RealsenseModule, RealsenseComponent >(key, pFactory)
                     , m_serialNumber(0)
             {
-
-                Graph::UTQLSubgraph::NodePtr config;
-
-                if (subgraph->hasNode("Camera"))
-                    config = subgraph->getNode("Camera");
-
-                if (!config) {
-                    UBITRACK_THROW("RealsenseModule Pattern is missing \"Camera\" node");
-                }
-
-                if (config->hasAttribute("rsSerialNumber")) {
-                    config->getAttributeData("rsSerialNumber", m_serialNumber);
+                if (subgraph->m_DataflowAttributes.hasAttribute("rsSerialNumber")) {
+                    subgraph->m_DataflowAttributes.getAttributeData("rsSerialNumber", m_serialNumber);
                 }
             }
 
             /** destructor */
-            virtual ~RealsenseModule() {};
+            ~RealsenseModule() override = default;
 
             virtual void setupDevice();
 
-            virtual void startModule();
+            void startModule() override;
 
             void startCapturing();
 
             void handleFrame(rs2::frame f);
 
-            virtual void stopModule();
+            void stopModule() override;
 
             virtual void teardownDevice();
 
@@ -357,7 +339,7 @@ using namespace Dataflow;
         }
 
         /** destructor */
-        ~RealsenseComponent() {};
+        ~RealsenseComponent() override = default;
 
     };
 
@@ -369,32 +351,53 @@ using namespace Dataflow;
                 const RealsenseComponentKey& componentKey, RealsenseModule* pModule )
                 : RealsenseComponent(name, subgraph, componentKey, pModule)
                 , m_outputPort("ImageOutput", *this)
-                , m_streamFormat( rs2_format::RS2_FORMAT_BGR8 )
+                , m_streamFormat( rs2_format::RS2_FORMAT_Y8 )
                 , m_imageWidth(0)
                 , m_imageHeight(0)
                 , m_frameRate(0)
                 , m_autoGPUUpload( false )
         {
 
-            if ( subgraph->m_DataflowAttributes.hasAttribute( "rsResolution" ) )
-            {
-                std::string sResolution = subgraph->m_DataflowAttributes.getAttributeString( "rsResolution" );
-                if ( realsenseStreamResolutionMap.find( sResolution ) == realsenseStreamResolutionMap.end() )
-                    UBITRACK_THROW( "unknown stream type: \"" + sResolution + "\"" );
-                std::tuple<unsigned int, unsigned int> resolution = realsenseStreamResolutionMap[ sResolution ];
-                m_imageWidth = std::get<0>(resolution);
-                m_imageHeight = std::get<1>(resolution);
+            // we have different enums/attribute names for color and infrared streams to improve usability of trackman
+            if (m_componentKey.getStreamType() == rs2_stream::RS2_STREAM_COLOR) {
+                if ( subgraph->m_DataflowAttributes.hasAttribute( "rsColorVideoResolution" ) )
+                {
+                    std::string sResolution = subgraph->m_DataflowAttributes.getAttributeString( "rsColorVideoResolution" );
+                    if ( realsenseStreamResolutionMap.find( sResolution ) == realsenseStreamResolutionMap.end() )
+                        UBITRACK_THROW( "unknown stream resolution: \"" + sResolution + "\"" );
+                    std::tuple<unsigned int, unsigned int> resolution = realsenseStreamResolutionMap[ sResolution ];
+                    m_imageWidth = std::get<0>(resolution);
+                    m_imageHeight = std::get<1>(resolution);
+                }
+                if ( subgraph->m_DataflowAttributes.hasAttribute( "rsColorVideoStreamFormat" ) )
+                {
+                    std::string sStreamFormat = subgraph->m_DataflowAttributes.getAttributeString( "rsColorVideoStreamFormat" );
+                    if ( realsenseStreamFormatMap.find( sStreamFormat ) == realsenseStreamFormatMap.end() )
+                        UBITRACK_THROW( "unknown stream type: \"" + sStreamFormat + "\"" );
+                    m_streamFormat = realsenseStreamFormatMap[ sStreamFormat ];
+                }
+
+            } else if (m_componentKey.getStreamType() == rs2_stream::RS2_STREAM_INFRARED) {
+                if ( subgraph->m_DataflowAttributes.hasAttribute( "rsInfraredVideoResolution" ) )
+                {
+                    std::string sResolution = subgraph->m_DataflowAttributes.getAttributeString( "rsInfraredVideoResolution" );
+                    if ( realsenseStreamResolutionMap.find( sResolution ) == realsenseStreamResolutionMap.end() )
+                        UBITRACK_THROW( "unknown stream resolution: \"" + sResolution + "\"" );
+                    std::tuple<unsigned int, unsigned int> resolution = realsenseStreamResolutionMap[ sResolution ];
+                    m_imageWidth = std::get<0>(resolution);
+                    m_imageHeight = std::get<1>(resolution);
+                }
+                if ( subgraph->m_DataflowAttributes.hasAttribute( "rsInfraredVideoStreamFormat" ) )
+                {
+                    std::string sStreamFormat = subgraph->m_DataflowAttributes.getAttributeString( "rsInfraredVideoStreamFormat" );
+                    if ( realsenseStreamFormatMap.find( sStreamFormat ) == realsenseStreamFormatMap.end() )
+                        UBITRACK_THROW( "unknown stream type: \"" + sStreamFormat + "\"" );
+                    m_streamFormat = realsenseStreamFormatMap[ sStreamFormat ];
+                }
             }
 
-            subgraph->m_DataflowAttributes.getAttributeData( "frameRate", m_frameRate );
+            subgraph->m_DataflowAttributes.getAttributeData( "rsFrameRate", m_frameRate );
 
-            if ( subgraph->m_DataflowAttributes.hasAttribute( "rsStreamFormat" ) )
-            {
-                std::string sStreamFormat = subgraph->m_DataflowAttributes.getAttributeString( "rsStreamFormat" );
-                if ( realsenseStreamFormatMap.find( sStreamFormat ) == realsenseStreamFormatMap.end() )
-                    UBITRACK_THROW( "unknown stream type: \"" + sStreamFormat + "\"" );
-                m_streamFormat = realsenseStreamFormatMap[ sStreamFormat ];
-            }
 
             Vision::OpenCLManager& oclManager = Vision::OpenCLManager::singleton();
             if (oclManager.isEnabled()) {
@@ -449,16 +452,18 @@ using namespace Dataflow;
         RealsensePointCloudComponent( const std::string& name, boost::shared_ptr< Graph::UTQLSubgraph > subgraph,
                                  const RealsenseComponentKey& componentKey, RealsenseModule* pModule )
                 : RealsenseComponent(name, subgraph, componentKey, pModule)
-                , m_outputPort("ImageOutput", *this)
-                , m_streamFormat( rs2_format::RS2_FORMAT_XYZ32F )
+                , m_outputPort("PointCloudOutput", *this)
+                , m_outputDepthmapPort("DepthImageOutput", *this)
+                , m_streamFormat( rs2_format::RS2_FORMAT_Z16 )
                 , m_imageWidth(0)
                 , m_imageHeight(0)
                 , m_frameRate(0)
+                , m_autoGPUUpload( false )
         {
 
-            if ( subgraph->m_DataflowAttributes.hasAttribute( "rsResolution" ) )
+            if ( subgraph->m_DataflowAttributes.hasAttribute( "rsDepthResolution" ) )
             {
-                std::string sResolution = subgraph->m_DataflowAttributes.getAttributeString( "rsResolution" );
+                std::string sResolution = subgraph->m_DataflowAttributes.getAttributeString( "rsDepthResolution" );
                 if ( realsenseStreamResolutionMap.find( sResolution ) == realsenseStreamResolutionMap.end() )
                     UBITRACK_THROW( "unknown stream type: \"" + sResolution + "\"" );
                 std::tuple<unsigned int, unsigned int> resolution = realsenseStreamResolutionMap[ sResolution ];
@@ -466,14 +471,24 @@ using namespace Dataflow;
                 m_imageHeight = std::get<1>(resolution);
             }
 
-            subgraph->m_DataflowAttributes.getAttributeData( "frameRate", m_frameRate );
-
-            if ( subgraph->m_DataflowAttributes.hasAttribute( "rsStreamFormat" ) )
+            if ( subgraph->m_DataflowAttributes.hasAttribute( "rsDepthStreamFormat" ) )
             {
-                std::string sStreamFormat = subgraph->m_DataflowAttributes.getAttributeString( "rsStreamFormat" );
+                std::string sStreamFormat = subgraph->m_DataflowAttributes.getAttributeString( "rsDepthStreamFormat" );
                 if ( realsenseStreamFormatMap.find( sStreamFormat ) == realsenseStreamFormatMap.end() )
                     UBITRACK_THROW( "unknown stream type: \"" + sStreamFormat + "\"" );
                 m_streamFormat = realsenseStreamFormatMap[ sStreamFormat ];
+            }
+
+            subgraph->m_DataflowAttributes.getAttributeData( "rsFrameRate", m_frameRate );
+
+            Vision::OpenCLManager& oclManager = Vision::OpenCLManager::singleton();
+            if (oclManager.isEnabled()) {
+                if (subgraph->m_DataflowAttributes.hasAttribute("uploadImageOnGPU")){
+                    m_autoGPUUpload = subgraph->m_DataflowAttributes.getAttributeString("uploadImageOnGPU") == "true";
+                }
+                if (m_autoGPUUpload){
+                    oclManager.activate();
+                }
             }
 
         }
@@ -502,10 +517,13 @@ using namespace Dataflow;
 
     protected:
         Dataflow::PushSupplier <Measurement::PositionList> m_outputPort;
+        Dataflow::PushSupplier <Measurement::ImageMeasurement> m_outputDepthmapPort;
         unsigned int m_imageWidth;
         unsigned int m_imageHeight;
         unsigned int m_frameRate;
         rs2_format m_streamFormat;
+
+        bool m_autoGPUUpload;
     };
 
 } } // namespace Ubitrack::Drivers
