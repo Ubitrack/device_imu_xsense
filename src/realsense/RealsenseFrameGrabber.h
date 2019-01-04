@@ -134,6 +134,8 @@ using namespace Dataflow;
 
         void retrieveCalibration();
 
+        void setOptions();
+
         void start();
 
         void startCapturing();
@@ -218,6 +220,10 @@ using namespace Dataflow;
         rs2_format m_depthStreamFormat;
 
         unsigned int m_serialNumber;
+
+        unsigned int m_depthLaserPower;
+        unsigned int m_depthEmitterEnabled;
+        unsigned int m_infraredGain;
 
         /** librealsense context for managing devices **/
         rs2::context m_ctx;
