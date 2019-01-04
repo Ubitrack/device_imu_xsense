@@ -150,6 +150,9 @@ namespace Ubitrack { namespace Drivers {
         , m_infraredStreamFormat(rs2_format::RS2_FORMAT_Y16)
         , m_depthStreamFormat(rs2_format::RS2_FORMAT_Z16)
         , m_serialNumber(0)
+        , m_depthLaserPower(150)
+        , m_depthEmitterEnabled(1)
+        , m_infraredGain(16)
         , m_haveColorStream(false)
         , m_haveIRLeftStream(false)
         , m_haveIRRightStream(false)
@@ -197,6 +200,10 @@ namespace Ubitrack { namespace Drivers {
         }
 
         subgraph->m_DataflowAttributes.getAttributeData( "rsFrameRate", m_frameRate );
+
+        subgraph->m_DataflowAttributes.getAttributeData( "rsLaserPower", m_depthLaserPower);
+        subgraph->m_DataflowAttributes.getAttributeData( "rsEmitterEnabled", m_depthEmitterEnabled);
+        subgraph->m_DataflowAttributes.getAttributeData( "rsInfraredGain", m_infraredGain);
 
         // the following is an attempt to make the component configurable through the associated pattern.
         // if certain edges don't exist in the pattern, the streams will not be requested from the camera.
@@ -391,7 +398,7 @@ namespace Ubitrack { namespace Drivers {
                 auto height = (std::size_t)intr.height;
 
                 m_colorCameraModel = Math::CameraIntrinsics<double>(intrinsicMatrix, radial, tangential, width, height);
-                LOG4CPP_INFO(logger, "Color Camera Model: " << m_colorCameraModel);
+                LOG4CPP_DEBUG(logger, "Color Camera Model: " << m_colorCameraModel);
             }
         } else {
             m_colorCameraModel = Math::CameraIntrinsics<double>();
@@ -419,7 +426,7 @@ namespace Ubitrack { namespace Drivers {
                 auto height = (std::size_t)intr.height;
 
                 m_infraredLeftCameraModel = Math::CameraIntrinsics<double>(intrinsicMatrix, radial, tangential, width, height);
-                LOG4CPP_INFO(logger, "IR Left Camera Model: " << m_infraredLeftCameraModel);
+                LOG4CPP_DEBUG(logger, "IR Left Camera Model: " << m_infraredLeftCameraModel);
             }
         } else {
             m_infraredLeftCameraModel = Math::CameraIntrinsics<double>();
@@ -447,7 +454,7 @@ namespace Ubitrack { namespace Drivers {
                 auto height = (std::size_t)intr.height;
 
                 m_infraredRightCameraModel = Math::CameraIntrinsics<double>(intrinsicMatrix, radial, tangential, width, height);
-                LOG4CPP_INFO(logger, "IR Right Camera Model: " << m_infraredRightCameraModel);
+                LOG4CPP_DEBUG(logger, "IR Right Camera Model: " << m_infraredRightCameraModel);
             }
         } else {
             m_infraredRightCameraModel = Math::CameraIntrinsics<double>();
@@ -472,7 +479,6 @@ namespace Ubitrack { namespace Drivers {
             rot_mat( 0, 2 ) = left2right.rotation[2];
             rot_mat( 1, 2 ) = left2right.rotation[5];
             rot_mat( 2, 2 ) = left2right.rotation[8];
-            LOG4CPP_INFO(logger, "Left2Right Transform Rotation Matrix: " << rot_mat);
 
             Math::Quaternion ut_quat(rot_mat);
 
@@ -482,7 +488,7 @@ namespace Ubitrack { namespace Drivers {
                     (double)left2right.translation[2]
                     );
             m_leftToRightTransform = Math::Pose(ut_quat, ut_trans);
-            LOG4CPP_INFO(logger, "IR Left2Right Transform: " << m_leftToRightTransform);
+            LOG4CPP_DEBUG(logger, "IR Left2Right Transform: " << m_leftToRightTransform);
         } else {
             m_leftToRightTransform = Math::Pose();
         }
@@ -507,7 +513,6 @@ namespace Ubitrack { namespace Drivers {
             rot_mat( 0, 2 ) = left2color.rotation[2];
             rot_mat( 1, 2 ) = left2color.rotation[5];
             rot_mat( 2, 2 ) = left2color.rotation[8];
-            LOG4CPP_INFO(logger, "Left2Color Transform Rotation Matrix: " << rot_mat);
 
             Math::Quaternion ut_quat(rot_mat);
 
@@ -517,18 +522,26 @@ namespace Ubitrack { namespace Drivers {
                     (double)left2color.translation[2]
             );
             m_leftToColorTransform = Math::Pose(ut_quat, ut_trans);
-            LOG4CPP_INFO(logger, "IR Left2Color Transform: " << m_leftToColorTransform);
+            LOG4CPP_DEBUG(logger, "IR Left2Color Transform: " << m_leftToColorTransform);
         } else {
             m_leftToColorTransform = Math::Pose();
         }
 
+        // retrieve depth scaling from sensor like this:
+        //A Depth stream contains an image that is composed of pixels with depth information.
+        //The value of each pixel is the distance from the camera, in some distance units.
+        //To get the distance in units of meters, each pixel's value should be multiplied by the sensor's depth scale
+        //Here is the way to grab this scale value for a "depth" sensor:
+//        if (rs2::depth_sensor dpt_sensor = sensor.as<rs2::depth_sensor>())
+//        {
+//            float scale = dpt_sensor.get_depth_scale();
+//            std::cout << "Scale factor for depth sensor is: " << scale << std::endl;
+//            return scale;
+//        }
+
     }
 
-    void RealsenseCameraComponent::startCapturing() {
-
-        setupDevice();
-        retrieveCalibration();
-
+    void RealsenseCameraComponent::setOptions() {
         /** D435 Options
             setting options works on sensors not on streams.
             not sure how to implement this in a useful way
@@ -566,6 +579,26 @@ namespace Ubitrack { namespace Drivers {
                 Auto Exposure Priority                             : 0    ... 1           1     0
          */
 
+
+        for (auto&& sensor : m_active_sensors) {
+            if (rs2::depth_sensor dpt_sensor = sensor.as<rs2::depth_sensor>())
+            {
+                // depth sensor options
+                dpt_sensor.set_option(rs2_option::RS2_OPTION_LASER_POWER, m_depthLaserPower);
+                dpt_sensor.set_option(rs2_option::RS2_OPTION_EMITTER_ENABLED, m_depthEmitterEnabled);
+                dpt_sensor.set_option(rs2_option::RS2_OPTION_GAIN, m_infraredGain);
+            } else {
+                // color sensor options ?
+            }
+
+        }
+    }
+
+    void RealsenseCameraComponent::startCapturing() {
+
+        setupDevice();
+        retrieveCalibration();
+        setOptions();
 
         // Start streaming
         for (auto&& sensor : m_active_sensors) {

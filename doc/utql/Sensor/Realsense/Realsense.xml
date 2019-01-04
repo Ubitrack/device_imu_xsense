@@ -133,9 +133,23 @@
 
             <Attribute name="rsInfraredVideoStreamFormat" value="Y8" xsi:type="EnumAttributeReferenceType"/>
 
-            <Attribute name="rsDepthResolution" value="1280x720" xsi:type="EnumAttributeReferenceType"/>
+            <Attribute name="rsDepthResolution" value="848x480" xsi:type="EnumAttributeReferenceType"/>
 
             <Attribute name="rsFrameRate" default="30" displayName="Frame Rate" xsi:type="IntAttributeDeclarationType"/>
+
+            <Attribute name="rsLaserPower" default="150" displayName="Laser Power" xsi:type="IntAttributeDeclarationType"/>
+            <Attribute name="rsInfraredGain" default="16" displayName="IR Camera Gain" xsi:type="IntAttributeDeclarationType"/>
+
+            <Attribute name="rsEmitterEnabled" displayName="Emitter Enabled" default="1" xsi:type="EnumAttributeDeclarationType">
+                <Description>
+                    <h:p>
+                        Enable the Laser Emitter. Turning of the emitter can be useful for calibration with IR cameras.
+                    </h:p>
+                </Description>
+                <EnumValue name="0" displayName="False"/>
+                <EnumValue name="1"  displayName="True"/>
+            </Attribute>
+
 
             <Attribute name="uploadImageOnGPU" displayName="Automatic Upload on GPU" default="false" xsi:type="EnumAttributeDeclarationType">
                 <Description>
