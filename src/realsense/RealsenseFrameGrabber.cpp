@@ -50,10 +50,218 @@ using namespace Ubitrack;
 using namespace Ubitrack::Vision;
 using namespace Ubitrack::Drivers;
 
+Ubitrack::Vision::Image::ImageFormatProperties getImageFormatPropertiesFromRS2Frame(rs2::frame& f) {
+    auto imageFormatProperties = Vision::Image::ImageFormatProperties();
+    switch (f.get_profile().format()) {
+        case RS2_FORMAT_BGRA8:
+            imageFormatProperties.depth = CV_8U;
+            imageFormatProperties.channels = 4;
+            imageFormatProperties.matType = CV_8UC4;
+            imageFormatProperties.bitsPerPixel = 32;
+            imageFormatProperties.origin = 0;
+            imageFormatProperties.imageFormat = Vision::Image::BGRA;
+            break;
+
+        case RS2_FORMAT_BGR8:
+            imageFormatProperties.depth = CV_8U;
+            imageFormatProperties.channels = 3;
+            imageFormatProperties.matType = CV_8UC3;
+            imageFormatProperties.bitsPerPixel = 24;
+            imageFormatProperties.origin = 0;
+            imageFormatProperties.imageFormat = Vision::Image::BGR;
+            break;
+
+        case RS2_FORMAT_RGBA8:
+            imageFormatProperties.depth = CV_8U;
+            imageFormatProperties.channels = 4;
+            imageFormatProperties.matType = CV_8UC4;
+            imageFormatProperties.bitsPerPixel = 32;
+            imageFormatProperties.origin = 0;
+            imageFormatProperties.imageFormat = Vision::Image::RGBA;
+            break;
+
+        case RS2_FORMAT_RGB8:
+            imageFormatProperties.depth = CV_8U;
+            imageFormatProperties.channels = 3;
+            imageFormatProperties.matType = CV_8UC3;
+            imageFormatProperties.bitsPerPixel = 24;
+            imageFormatProperties.origin = 0;
+            imageFormatProperties.imageFormat = Vision::Image::RGB;
+            break;
+
+        case RS2_FORMAT_Y16:
+            imageFormatProperties.depth = CV_16U;
+            imageFormatProperties.channels = 1;
+            imageFormatProperties.matType = CV_16UC1;
+            imageFormatProperties.bitsPerPixel = 16;
+            imageFormatProperties.origin = 0;
+            imageFormatProperties.imageFormat = Vision::Image::LUMINANCE;
+            break;
+
+        case RS2_FORMAT_Y8:
+            imageFormatProperties.depth = CV_8U;
+            imageFormatProperties.channels = 1;
+            imageFormatProperties.matType = CV_8UC1;
+            imageFormatProperties.bitsPerPixel = 8;
+            imageFormatProperties.origin = 0;
+            imageFormatProperties.imageFormat = Vision::Image::LUMINANCE;
+            break;
+
+        case RS2_FORMAT_Z16:
+            imageFormatProperties.depth = CV_16U;
+            imageFormatProperties.channels = 1;
+            imageFormatProperties.matType = CV_16UC1;
+            imageFormatProperties.bitsPerPixel = 16;
+            imageFormatProperties.origin = 0;
+            imageFormatProperties.imageFormat = Vision::Image::DEPTH;
+            break;
+
+        default:
+            UBITRACK_THROW("Realsense frame format is not supported!");
+    }
+    return imageFormatProperties;
+}
+
 
 namespace Ubitrack { namespace Drivers {
 
-    void RealsenseModule::setupDevice()
+    RealsenseCameraComponent::RealsenseCameraComponent( const std::string& sName, boost::shared_ptr< Graph::UTQLSubgraph > subgraph  )
+        : Dataflow::Component( sName )
+        , m_outputColorImagePort("ColorImageOutput", *this)
+        , m_outputIRLeftImagePort("IRLeftImageOutput", *this)
+        , m_outputIRRightImagePort("IRRightImageOutput", *this)
+        , m_outputDepthMapImagePort("DepthImageOutput", *this)
+        , m_outputPointCloudPort("PointCloudOutput", *this)
+        , m_outputColorCameraModelPort("ColorCameraModel", *this, boost::bind(&RealsenseCameraComponent::getColorCameraModel, this, _1))
+        , m_outputColorIntrinsicsMatrixPort("ColorIntrinsics", *this, boost::bind(&RealsenseCameraComponent::getColorIntrinsic, this, _1))
+        , m_outputIRLeftCameraModelPort("IRLeftCameraModel", *this, boost::bind(&RealsenseCameraComponent::getIRLeftCameraModel, this, _1))
+        , m_outputIRLeftIntrinsicsMatrixPort("IRLeftIntrinsics", *this, boost::bind(&RealsenseCameraComponent::getIRLeftIntrinsic, this, _1))
+        , m_outputIRRightCameraModelPort("RightCameraModel", *this, boost::bind(&RealsenseCameraComponent::getIRRightCameraModel, this, _1))
+        , m_outputIRRightIntrinsicsMatrixPort("IRRightIntrinsics", *this, boost::bind(&RealsenseCameraComponent::getIRRightIntrinsic, this, _1))
+        , m_leftIRToRightIRTransformPort("LeftToRightTransform", *this, boost::bind(&RealsenseCameraComponent::getLeftToRightTransform, this, _1))
+        , m_leftIRToColorTransformPort("LeftToColorTransform", *this, boost::bind(&RealsenseCameraComponent::getLeftToColorTransform, this, _1))
+
+        , m_colorImageWidth(0)
+        , m_colorImageHeight(0)
+        , m_depthImageWidth(0)
+        , m_depthImageHeight(0)
+        , m_frameRate(0)
+        , m_colorStreamFormat(rs2_format::RS2_FORMAT_BGR8)
+        , m_infraredStreamFormat(rs2_format::RS2_FORMAT_Y16)
+        , m_depthStreamFormat(rs2_format::RS2_FORMAT_Z16)
+        , m_serialNumber(0)
+        , m_haveColorStream(false)
+        , m_haveIRLeftStream(false)
+        , m_haveIRRightStream(false)
+        , m_haveDepthStream(false)
+        , m_autoGPUUpload(false)
+    {
+
+        if (subgraph->m_DataflowAttributes.hasAttribute("rsSerialNumber")) {
+            subgraph->m_DataflowAttributes.getAttributeData("rsSerialNumber", m_serialNumber);
+        }
+
+        if ( subgraph->m_DataflowAttributes.hasAttribute( "rsColorVideoResolution" ) )
+        {
+            std::string sResolution = subgraph->m_DataflowAttributes.getAttributeString( "rsColorVideoResolution" );
+            if ( realsenseStreamResolutionMap.find( sResolution ) == realsenseStreamResolutionMap.end() )
+                UBITRACK_THROW( "unknown stream resolution: \"" + sResolution + "\"" );
+            std::tuple<unsigned int, unsigned int> resolution = realsenseStreamResolutionMap[ sResolution ];
+            m_colorImageWidth = std::get<0>(resolution);
+            m_colorImageHeight = std::get<1>(resolution);
+        }
+        if ( subgraph->m_DataflowAttributes.hasAttribute( "rsColorVideoStreamFormat" ) )
+        {
+            std::string sStreamFormat = subgraph->m_DataflowAttributes.getAttributeString( "rsColorVideoStreamFormat" );
+            if ( realsenseStreamFormatMap.find( sStreamFormat ) == realsenseStreamFormatMap.end() )
+                UBITRACK_THROW( "unknown stream type: \"" + sStreamFormat + "\"" );
+            m_colorStreamFormat = realsenseStreamFormatMap[ sStreamFormat ];
+        }
+
+        if ( subgraph->m_DataflowAttributes.hasAttribute( "rsInfraredVideoStreamFormat" ) )
+        {
+            std::string sStreamFormat = subgraph->m_DataflowAttributes.getAttributeString( "rsInfraredVideoStreamFormat" );
+            if ( realsenseStreamFormatMap.find( sStreamFormat ) == realsenseStreamFormatMap.end() )
+                UBITRACK_THROW( "unknown stream type: \"" + sStreamFormat + "\"" );
+            m_infraredStreamFormat = realsenseStreamFormatMap[ sStreamFormat ];
+        }
+
+        if ( subgraph->m_DataflowAttributes.hasAttribute( "rsDepthResolution" ) )
+        {
+            std::string sResolution = subgraph->m_DataflowAttributes.getAttributeString( "rsDepthResolution" );
+            if ( realsenseStreamResolutionMap.find( sResolution ) == realsenseStreamResolutionMap.end() )
+                UBITRACK_THROW( "unknown stream type: \"" + sResolution + "\"" );
+            std::tuple<unsigned int, unsigned int> resolution = realsenseStreamResolutionMap[ sResolution ];
+            m_depthImageWidth = std::get<0>(resolution);
+            m_depthImageHeight = std::get<1>(resolution);
+        }
+
+        subgraph->m_DataflowAttributes.getAttributeData( "rsFrameRate", m_frameRate );
+
+        // the following is an attempt to make the component configurable through the associated pattern.
+        // if certain edges don't exist in the pattern, the streams will not be requested from the camera.
+        if (subgraph->hasEdge("ColorImageOutput")) {
+            LOG4CPP_INFO(logger, "Activate Color Stream.");
+            m_stream_requests.push_back(
+                    {rs2_stream::RS2_STREAM_COLOR, m_colorStreamFormat, m_colorImageWidth,
+                     m_colorImageHeight, m_frameRate, 0, "ColorImageOutput"});
+            m_haveColorStream = true;
+        }
+
+        if (subgraph->hasEdge("IRLeftImageOutput")) {
+            LOG4CPP_INFO(logger, "Activate Left Infrared Stream.");
+            m_stream_requests.push_back(
+                    {rs2_stream::RS2_STREAM_INFRARED, m_infraredStreamFormat, m_depthImageWidth,
+                     m_depthImageHeight, m_frameRate, 1, "IRLeftImageOutput"});
+            m_haveIRLeftStream = true;
+        }
+
+        if (subgraph->hasEdge("IRRightImageOutput")) {
+            LOG4CPP_INFO(logger, "Activate Right Infrared Stream.");
+            m_stream_requests.push_back(
+                    {rs2_stream::RS2_STREAM_INFRARED, m_infraredStreamFormat, m_depthImageWidth,
+                     m_depthImageHeight, m_frameRate, 2, "IRRightImageOutput"});
+            m_haveIRRightStream = true;
+        }
+
+        if (subgraph->hasEdge("DepthImageOutput") || subgraph->hasEdge("PointCloudOutput")) {
+            LOG4CPP_INFO(logger, "Activate Depth Stream.");
+            m_stream_requests.push_back(
+                    {rs2_stream::RS2_STREAM_DEPTH, rs2_format::RS2_FORMAT_Z16, m_depthImageWidth,
+                     m_depthImageHeight, m_frameRate, 0, "DepthImageOutput"});
+            m_haveDepthStream = true;
+        }
+
+
+        Vision::OpenCLManager& oclManager = Vision::OpenCLManager::singleton();
+        if (oclManager.isEnabled()) {
+            if (subgraph->m_DataflowAttributes.hasAttribute("uploadImageOnGPU")){
+                m_autoGPUUpload = subgraph->m_DataflowAttributes.getAttributeString("uploadImageOnGPU") == "true";
+            }
+            if (m_autoGPUUpload){
+                oclManager.activate();
+            }
+        }
+    }
+
+    void RealsenseCameraComponent::start()
+    {
+        if ( !m_running )
+        {
+            // check if oclmanager is active
+            Vision::OpenCLManager& oclManager = Vision::OpenCLManager::singleton();
+            if ((oclManager.isEnabled()) && (oclManager.isActive()) && (!oclManager.isInitialized())) {
+                LOG4CPP_INFO(logger, "Waiting for OpenCLManager Initialization callback.");
+                oclManager.registerInitCallback(boost::bind(&RealsenseCameraComponent::startCapturing, this));
+            } else {
+                startCapturing();
+            }
+            m_running = true;
+        }
+        Component::start();
+    }
+
+    void RealsenseCameraComponent::setupDevice()
     {
         auto devices = m_ctx.query_devices();
         size_t device_count = devices.size();
@@ -84,47 +292,6 @@ namespace Ubitrack { namespace Drivers {
             UBITRACK_THROW("No Realsense camera with given serial number found");
         }
 
-        // initialize components
-        ComponentList allComponents = getAllComponents();
-
-        // get stream requests
-        m_stream_requests.clear();
-
-        for (auto i = allComponents.begin(); i != allComponents.end(); ++i) {
-            switch((*i)->getSensorType()) {
-                case REALSENSE_SENSOR_CONFIG:
-                {
-                    break;
-                }
-                case REALSENSE_SENSOR_VIDEO:
-                {
-                    auto vc = boost::static_pointer_cast<RealsenseVideoComponent>(*i);
-                    m_stream_requests.push_back({ vc->getSensorType(),
-                                                  vc->getStreamType(),
-                                                  vc->getStreamFormat(),
-                                                  vc->getImageWidth(),
-                                                  vc->getImageHeight(),
-                                                  vc->getFrameRate(),
-                                                  vc->getStreamIndex()
-                                                });
-                    break;
-                }
-                case REALSENSE_SENSOR_DEPTH:
-                {
-                    auto pc = boost::static_pointer_cast<RealsensePointCloudComponent>(*i);
-                    m_stream_requests.push_back({ pc->getSensorType(),
-                                                  pc->getStreamType(),
-                                                  pc->getStreamFormat(),
-                                                  pc->getImageWidth(),
-                                                  pc->getImageHeight(),
-                                                  pc->getFrameRate(),
-                                                  pc->getStreamIndex()
-                                                });
-                    break;
-                }
-            }
-        }
-
         if (!m_stream_requests.empty()) {
             std::sort(m_stream_requests.begin(), m_stream_requests.end(),
                       [](const stream_request &l, const stream_request &r) {
@@ -142,6 +309,7 @@ namespace Ubitrack { namespace Drivers {
         bool succeed = false;
         std::vector<rs2::stream_profile> matches;
         size_t expected_number_of_streams = m_stream_requests.size();
+        m_stream_profile_map.clear();
 
         // Configure and starts streaming
         for (auto&& sensor : m_dev->query_sensors())
@@ -154,7 +322,7 @@ namespace Ubitrack { namespace Drivers {
 
                 // Find profile matches
                 auto fulfilled_request = std::find_if(m_stream_requests.begin(), m_stream_requests.end(),
-                        [&matches, profile](const stream_request& req)
+                        [&matches, profile, this](const stream_request& req)
                     {
                         bool res = false;
                         if ((profile.stream_type() == req._stream_type) &&
@@ -169,14 +337,16 @@ namespace Ubitrack { namespace Drivers {
                             }
                             res = true;
                             matches.emplace_back(profile);
+                            m_stream_profile_map[req._port_name] = profile;
                         }
 
                         return res;
                     });
 
                 // Remove the request once resolved
-                if (fulfilled_request != m_stream_requests.end())
+                if (fulfilled_request != m_stream_requests.end()) {
                     m_stream_requests.erase(fulfilled_request);
+                }
             }
 
             // Aggregate resolved requests
@@ -197,25 +367,167 @@ namespace Ubitrack { namespace Drivers {
         }
     }
 
-    void RealsenseModule::startModule()
-    {
-        if ( !m_running )
-        {
-            // check if oclmanager is active
-            Vision::OpenCLManager& oclManager = Vision::OpenCLManager::singleton();
-            if ((oclManager.isEnabled()) && (oclManager.isActive()) && (!oclManager.isInitialized())) {
-                LOG4CPP_INFO(logger, "Waiting for OpenCLManager Initialization callback.");
-                oclManager.registerInitCallback(boost::bind(&RealsenseModule::startCapturing, this));
-            } else {
-                startCapturing();
+    void RealsenseCameraComponent::retrieveCalibration() {
+        // @todo get_intrinsics could throw exception .. should be handled.
+        if (m_haveColorStream) {
+            auto& stream_profile = m_stream_profile_map["ColorImageOutput"];
+            if (auto vp = stream_profile.as<rs2::video_stream_profile>()) {
+                rs2_intrinsics intr = vp.get_intrinsics();
+
+                Math::Matrix< double, 3, 3 > intrinsicMatrix = Math::Matrix3x3d::identity();
+                intrinsicMatrix(0, 0) = intr.fx;
+                intrinsicMatrix(1, 1) = intr.fy;
+                intrinsicMatrix(0, 2) = -intr.ppx;
+                intrinsicMatrix(1, 2) = -intr.ppy;
+                intrinsicMatrix(2, 2) = -1.0;
+
+                // [ k1, k2, p1, p2, k3 ]
+                Math::Vector< double, 3 > radial(intr.coeffs[0],
+                                                 intr.coeffs[1],
+                                                 intr.coeffs[4]);
+                Math::Vector< double, 2 > tangential(intr.coeffs[2],
+                                                     intr.coeffs[3]);
+                auto width = (std::size_t)intr.width;
+                auto height = (std::size_t)intr.height;
+
+                m_colorCameraModel = Math::CameraIntrinsics<double>(intrinsicMatrix, radial, tangential, width, height);
+                LOG4CPP_INFO(logger, "Color Camera Model: " << m_colorCameraModel);
             }
-            m_running = true;
+        } else {
+            m_colorCameraModel = Math::CameraIntrinsics<double>();
         }
+
+        if (m_haveIRLeftStream) {
+            auto& stream_profile = m_stream_profile_map["IRLeftImageOutput"];
+            if (auto vp = stream_profile.as<rs2::video_stream_profile>()) {
+                rs2_intrinsics intr = vp.get_intrinsics();
+
+                Math::Matrix< double, 3, 3 > intrinsicMatrix = Math::Matrix3x3d::identity();
+                intrinsicMatrix(0, 0) = intr.fx;
+                intrinsicMatrix(1, 1) = intr.fy;
+                intrinsicMatrix(0, 2) = -intr.ppx;
+                intrinsicMatrix(1, 2) = -intr.ppy;
+                intrinsicMatrix(2, 2) = -1.0;
+
+                // [ k1, k2, p1, p2, k3 ]
+                Math::Vector< double, 3 > radial(intr.coeffs[0],
+                                                 intr.coeffs[1],
+                                                 intr.coeffs[4]);
+                Math::Vector< double, 2 > tangential(intr.coeffs[2],
+                                                     intr.coeffs[3]);
+                auto width = (std::size_t)intr.width;
+                auto height = (std::size_t)intr.height;
+
+                m_infraredLeftCameraModel = Math::CameraIntrinsics<double>(intrinsicMatrix, radial, tangential, width, height);
+                LOG4CPP_INFO(logger, "IR Left Camera Model: " << m_infraredLeftCameraModel);
+            }
+        } else {
+            m_infraredLeftCameraModel = Math::CameraIntrinsics<double>();
+        }
+
+        if (m_haveIRRightStream) {
+            auto& stream_profile = m_stream_profile_map["IRRightImageOutput"];
+            if (auto vp = stream_profile.as<rs2::video_stream_profile>()) {
+                rs2_intrinsics intr = vp.get_intrinsics();
+
+                Math::Matrix< double, 3, 3 > intrinsicMatrix = Math::Matrix3x3d::identity();
+                intrinsicMatrix(0, 0) = intr.fx;
+                intrinsicMatrix(1, 1) = intr.fy;
+                intrinsicMatrix(0, 2) = -intr.ppx;
+                intrinsicMatrix(1, 2) = -intr.ppy;
+                intrinsicMatrix(2, 2) = -1.0;
+
+                // [ k1, k2, p1, p2, k3 ]
+                Math::Vector< double, 3 > radial(intr.coeffs[0],
+                                                 intr.coeffs[1],
+                                                 intr.coeffs[4]);
+                Math::Vector< double, 2 > tangential(intr.coeffs[2],
+                                                     intr.coeffs[3]);
+                auto width = (std::size_t)intr.width;
+                auto height = (std::size_t)intr.height;
+
+                m_infraredRightCameraModel = Math::CameraIntrinsics<double>(intrinsicMatrix, radial, tangential, width, height);
+                LOG4CPP_INFO(logger, "IR Right Camera Model: " << m_infraredRightCameraModel);
+            }
+        } else {
+            m_infraredRightCameraModel = Math::CameraIntrinsics<double>();
+        }
+
+
+        if (m_haveIRLeftStream && m_haveIRRightStream) {
+            auto& left_stream_profile = m_stream_profile_map["IRLeftImageOutput"];
+            auto& right_stream_profile = m_stream_profile_map["IRRightImageOutput"];
+            auto left2right = left_stream_profile.get_extrinsics_to(right_stream_profile);
+            auto rot_mat = Math::Matrix3x3d::identity();
+
+            // librealsense and ubitrack store matrices column-major
+            rot_mat( 0, 0 ) = left2right.rotation[0];
+            rot_mat( 1, 0 ) = left2right.rotation[3];
+            rot_mat( 2, 0 ) = left2right.rotation[6];
+
+            rot_mat( 0, 1 ) = left2right.rotation[1];
+            rot_mat( 1, 1 ) = left2right.rotation[4];
+            rot_mat( 2, 1 ) = left2right.rotation[7];
+
+            rot_mat( 0, 2 ) = left2right.rotation[2];
+            rot_mat( 1, 2 ) = left2right.rotation[5];
+            rot_mat( 2, 2 ) = left2right.rotation[8];
+            LOG4CPP_INFO(logger, "Left2Right Transform Rotation Matrix: " << rot_mat);
+
+            Math::Quaternion ut_quat(rot_mat);
+
+            Math::Vector3d ut_trans(
+                    (double)left2right.translation[0],
+                    (double)left2right.translation[1],
+                    (double)left2right.translation[2]
+                    );
+            m_leftToRightTransform = Math::Pose(ut_quat, ut_trans);
+            LOG4CPP_INFO(logger, "IR Left2Right Transform: " << m_leftToRightTransform);
+        } else {
+            m_leftToRightTransform = Math::Pose();
+        }
+
+        // only one of the two streams leftIR or depth might be available
+        // the available models had identical calibration values, so we take either
+        if ((m_haveIRLeftStream || m_haveDepthStream) && m_haveColorStream) {
+            auto& left_stream_profile = m_haveIRLeftStream ? m_stream_profile_map["IRLeftImageOutput"] : m_stream_profile_map["DepthImageOutput"];
+            auto& color_stream_profile = m_stream_profile_map["ColorImageOutput"];
+            auto left2color = left_stream_profile.get_extrinsics_to(color_stream_profile);
+            auto rot_mat = Math::Matrix3x3d::identity();
+
+            // librealsense and ubitrack store matrices column-major
+            rot_mat( 0, 0 ) = left2color.rotation[0];
+            rot_mat( 1, 0 ) = left2color.rotation[3];
+            rot_mat( 2, 0 ) = left2color.rotation[6];
+
+            rot_mat( 0, 1 ) = left2color.rotation[1];
+            rot_mat( 1, 1 ) = left2color.rotation[4];
+            rot_mat( 2, 1 ) = left2color.rotation[7];
+
+            rot_mat( 0, 2 ) = left2color.rotation[2];
+            rot_mat( 1, 2 ) = left2color.rotation[5];
+            rot_mat( 2, 2 ) = left2color.rotation[8];
+            LOG4CPP_INFO(logger, "Left2Color Transform Rotation Matrix: " << rot_mat);
+
+            Math::Quaternion ut_quat(rot_mat);
+
+            Math::Vector3d ut_trans(
+                    (double)left2color.translation[0],
+                    (double)left2color.translation[1],
+                    (double)left2color.translation[2]
+            );
+            m_leftToColorTransform = Math::Pose(ut_quat, ut_trans);
+            LOG4CPP_INFO(logger, "IR Left2Color Transform: " << m_leftToColorTransform);
+        } else {
+            m_leftToColorTransform = Math::Pose();
+        }
+
     }
 
-    void RealsenseModule::startCapturing() {
+    void RealsenseCameraComponent::startCapturing() {
 
         setupDevice();
+        retrieveCalibration();
 
         /** D435 Options
             setting options works on sensors not on streams.
@@ -265,49 +577,152 @@ namespace Ubitrack { namespace Drivers {
 
     }
 
-    void RealsenseModule::handleFrame(rs2::frame f) {
+    void RealsenseCameraComponent::handleFrame(rs2::frame f) {
 
         // convert from frame timestamp (milliseconds, double) to Measurement::Timestamp (nanoseconds, unsigned long long)
         auto ts = (Measurement::Timestamp)(f.get_timestamp() * 1000000);
 
         rs2_stream stream_type = f.get_profile().stream_type();
-        RealsenseSensorType sensor_type;
-        switch(stream_type) {
-            case rs2_stream::RS2_STREAM_COLOR:
-            case rs2_stream::RS2_STREAM_INFRARED:
-                sensor_type = REALSENSE_SENSOR_VIDEO;
-                break;
+        int stream_index = f.get_profile().stream_index();
 
-            case rs2_stream::RS2_STREAM_DEPTH:
-                sensor_type = REALSENSE_SENSOR_DEPTH;
-                break;
+        if (stream_type == rs2_stream::RS2_STREAM_COLOR) {
+            if (auto vf = f.as<rs2::video_frame>()) {
+                auto imageFormatProperties = getImageFormatPropertiesFromRS2Frame(f);
 
-            default:
-                LOG4CPP_WARN(logger, "RealsenseModule received frame with unhandled stream_type: " << stream_type);
-                return;
-        }
+                int w = vf.get_width();
+                int h = vf.get_height();
 
-        RealsenseComponentKey key(sensor_type, stream_type, (unsigned int)(f.get_profile().stream_index()));
-        if ( hasComponent( key ) ) {
-            switch( sensor_type ) {
-                case REALSENSE_SENSOR_VIDEO:
-                {
-                    auto vc = boost::static_pointer_cast<RealsenseVideoComponent>(getComponent( key ));
-                    vc->handleFrame(ts, f);
-                    break;
+                // need to copy image here.
+                auto image = cv::Mat(cv::Size(w, h), imageFormatProperties.matType, (void *) f.get_data(),
+                                     cv::Mat::AUTO_STEP).clone();
+
+                if (m_outputColorImagePort.isConnected()) {
+                    boost::shared_ptr<Vision::Image> pColorImage(new Vision::Image(image));
+                    pColorImage->set_pixelFormat(imageFormatProperties.imageFormat);
+                    pColorImage->set_origin(imageFormatProperties.origin);
+
+                    if (m_autoGPUUpload) {
+                        Vision::OpenCLManager &oclManager = Vision::OpenCLManager::singleton();
+                        if (oclManager.isInitialized()) {
+                            //force upload to the GPU
+                            pColorImage->uMat();
+                        }
+                    }
+                    m_outputColorImagePort.send(Measurement::ImageMeasurement(ts, pColorImage));
+                }
+            } else {
+                LOG4CPP_WARN(logger, "Expected Video-Frame but cannot cast.");
+            }
+        } else if (stream_type == rs2_stream::RS2_STREAM_INFRARED) {
+            if (auto vf = f.as<rs2::video_frame>()) {
+                auto imageFormatProperties = getImageFormatPropertiesFromRS2Frame(f);
+
+                int w = vf.get_width();
+                int h = vf.get_height();
+
+                // need to copy image here.
+                auto image = cv::Mat(cv::Size(w, h), imageFormatProperties.matType, (void *) f.get_data(),
+                                     cv::Mat::AUTO_STEP).clone();
+
+                // Left IR Image
+                if (m_outputIRLeftImagePort.isConnected() && (stream_index == 1)) {
+                    boost::shared_ptr<Vision::Image> pInfraredImage(new Vision::Image(image));
+                    pInfraredImage->set_pixelFormat(imageFormatProperties.imageFormat);
+                    pInfraredImage->set_origin(imageFormatProperties.origin);
+
+                    if (m_autoGPUUpload) {
+                        Vision::OpenCLManager &oclManager = Vision::OpenCLManager::singleton();
+                        if (oclManager.isInitialized()) {
+                            //force upload to the GPU
+                            pInfraredImage->uMat();
+                        }
+                    }
+                    m_outputIRLeftImagePort.send(Measurement::ImageMeasurement(ts, pInfraredImage));
                 }
 
-                case REALSENSE_SENSOR_DEPTH:
-                {
-                    auto pc = boost::static_pointer_cast<RealsensePointCloudComponent>(getComponent( key ));
-                    pc->handleFrame(ts, f);
-                    break;
+                // Right IR Image
+                if (m_outputIRRightImagePort.isConnected() && (stream_index == 2)) {
+                    boost::shared_ptr<Vision::Image> pInfraredImage(new Vision::Image(image));
+                    pInfraredImage->set_pixelFormat(imageFormatProperties.imageFormat);
+                    pInfraredImage->set_origin(imageFormatProperties.origin);
+
+                    if (m_autoGPUUpload) {
+                        Vision::OpenCLManager &oclManager = Vision::OpenCLManager::singleton();
+                        if (oclManager.isInitialized()) {
+                            //force upload to the GPU
+                            pInfraredImage->uMat();
+                        }
+                    }
+                    m_outputIRRightImagePort.send(Measurement::ImageMeasurement(ts, pInfraredImage));
                 }
             }
+        } else if (stream_type == rs2_stream::RS2_STREAM_DEPTH) {
+            if (auto df = f.as<rs2::depth_frame>())
+            {
+                if (m_outputPointCloudPort.isConnected()) {
+                    // Declare pointcloud object, for calculating pointclouds and texture mappings
+                    rs2::pointcloud pc;
+
+                    // Generate the pointcloud and texture mappings
+                    rs2::points points = pc.calculate(df);
+
+                    // Tell pointcloud object to map to this color frame
+                    // @todo: currently no access to the color image .. now sure how to achieve this with the current structure ..
+                    // pc.map_to(color);
+
+                    auto vertices = points.get_vertices();
+
+                    Math::Vector3d init_pos(0, 0, 0);
+                    boost::shared_ptr < std::vector<Math::Vector3d> > pPointCloud = boost::make_shared< std::vector<Math::Vector3d> >(points.size(), init_pos);
+
+                    for (size_t i = 0; i < points.size(); i++) {
+                        Math::Vector3d& p = pPointCloud->at(i);
+
+                        if (vertices[i].z != 0.)
+                        {
+                            p[0] = vertices[i].x;
+                            p[1] = vertices[i].y;
+                            p[2] = vertices[i].z;
+                        } else {
+                            p[0] = p[1] = p[2] = 0.;
+                        }
+                    }
+                    m_outputPointCloudPort.send(Measurement::PositionList(ts, pPointCloud));
+                }
+
+                if (m_outputDepthMapImagePort.isConnected()) {
+
+                    auto imageFormatProperties = getImageFormatPropertiesFromRS2Frame(f);
+
+                    int w = df.get_width();
+                    int h = df.get_height();
+
+                    // need to copy image here.
+                    auto image = cv::Mat(cv::Size(w, h), imageFormatProperties.matType, (void*)f.get_data(), cv::Mat::AUTO_STEP).clone();
+
+                    boost::shared_ptr< Vision::Image > pDepthImage(new Vision::Image(image));
+                    pDepthImage->set_pixelFormat(imageFormatProperties.imageFormat);
+                    pDepthImage->set_origin(imageFormatProperties.origin);
+
+                    if (m_autoGPUUpload) {
+                        Vision::OpenCLManager &oclManager = Vision::OpenCLManager::singleton();
+                        if (oclManager.isInitialized()) {
+                            //force upload to the GPU
+                            pDepthImage->uMat();
+                        }
+                    }
+                    m_outputDepthMapImagePort.send(Measurement::ImageMeasurement(ts, pDepthImage));
+                }
+            }
+
+        } else {
+            LOG4CPP_WARN(logger, "Stream type is not known.");
         }
+
+
     }
 
-    void RealsenseModule::stopModule()
+    void RealsenseCameraComponent::stop()
     {
         if ( m_running )
         {
@@ -323,202 +738,16 @@ namespace Ubitrack { namespace Drivers {
         }
     }
 
-    void RealsenseModule::teardownDevice()
+    void RealsenseCameraComponent::teardownDevice()
     {
         m_dev.reset();
     }
 
 
-    boost::shared_ptr< RealsenseComponent > RealsenseModule::createComponent( const std::string& type,
-                                                                  const std::string& name, boost::shared_ptr< Graph::UTQLSubgraph> subgraph,
-                                                                  const ComponentKey& key, ModuleClass* pModule )
+// register component at factory
+    UBITRACK_REGISTER_COMPONENT( Dataflow::ComponentFactory* const cf )
     {
-
-        if ( type == "RealsenseVideoStream" )
-            return boost::shared_ptr< RealsenseComponent >( new RealsenseVideoComponent( name, subgraph, key, pModule ) );
-//            else if ( type == "RealsenseCameraCalibration" )
-//                return boost::shared_ptr< RealsenseComponent >( new RealsenseCameraCalibrationComponent( name, subgraph, key, pModule ) );
-        else if ( type == "RealsensePointCloud" )
-            return boost::shared_ptr< RealsenseComponent >( new RealsensePointCloudComponent( name, subgraph, key, pModule ) );
-
-        UBITRACK_THROW( "Class " + type + " not supported by Realsense module" );
+        cf->registerComponent< Ubitrack::Drivers::RealsenseCameraComponent > ( "RealsenseCamera" );
     }
-
-    void RealsenseVideoComponent::handleFrame(Measurement::Timestamp ts, rs2::frame f) {
-        if (auto vf = f.as<rs2::video_frame>())
-        {
-            auto imageFormatProperties = Vision::Image::ImageFormatProperties();
-            switch (f.get_profile().format()) {
-                case RS2_FORMAT_BGRA8:
-                    imageFormatProperties.depth = CV_8U;
-                    imageFormatProperties.channels = 4;
-                    imageFormatProperties.matType = CV_8UC4;
-                    imageFormatProperties.bitsPerPixel = 32;
-                    imageFormatProperties.origin = 0;
-                    imageFormatProperties.imageFormat = Vision::Image::BGRA;
-                    break;
-
-                case RS2_FORMAT_BGR8:
-                    imageFormatProperties.depth = CV_8U;
-                    imageFormatProperties.channels = 3;
-                    imageFormatProperties.matType = CV_8UC3;
-                    imageFormatProperties.bitsPerPixel = 24;
-                    imageFormatProperties.origin = 0;
-                    imageFormatProperties.imageFormat = Vision::Image::BGR;
-                    break;
-
-                case RS2_FORMAT_RGBA8:
-                    imageFormatProperties.depth = CV_8U;
-                    imageFormatProperties.channels = 4;
-                    imageFormatProperties.matType = CV_8UC4;
-                    imageFormatProperties.bitsPerPixel = 32;
-                    imageFormatProperties.origin = 0;
-                    imageFormatProperties.imageFormat = Vision::Image::RGBA;
-                    break;
-
-                case RS2_FORMAT_RGB8:
-                    imageFormatProperties.depth = CV_8U;
-                    imageFormatProperties.channels = 3;
-                    imageFormatProperties.matType = CV_8UC3;
-                    imageFormatProperties.bitsPerPixel = 24;
-                    imageFormatProperties.origin = 0;
-                    imageFormatProperties.imageFormat = Vision::Image::RGB;
-                    break;
-
-                case RS2_FORMAT_Y16:
-                    imageFormatProperties.depth = CV_16U;
-                    imageFormatProperties.channels = 1;
-                    imageFormatProperties.matType = CV_16UC1;
-                    imageFormatProperties.bitsPerPixel = 16;
-                    imageFormatProperties.origin = 0;
-                    imageFormatProperties.imageFormat = Vision::Image::LUMINANCE;
-                    break;
-
-                case RS2_FORMAT_Y8:
-                    imageFormatProperties.depth = CV_8U;
-                    imageFormatProperties.channels = 1;
-                    imageFormatProperties.matType = CV_8UC1;
-                    imageFormatProperties.bitsPerPixel = 8;
-                    imageFormatProperties.origin = 0;
-                    imageFormatProperties.imageFormat = Vision::Image::LUMINANCE;
-                    break;
-
-                case RS2_FORMAT_Z16:
-                    imageFormatProperties.depth = CV_16U;
-                    imageFormatProperties.channels = 1;
-                    imageFormatProperties.matType = CV_16UC1;
-                    imageFormatProperties.bitsPerPixel = 16;
-                    imageFormatProperties.origin = 0;
-                    imageFormatProperties.imageFormat = Vision::Image::DEPTH;
-                    break;
-
-                default:
-                    UBITRACK_THROW("Realsense frame format is not supported!");
-            }
-
-            int w = vf.get_width();
-            int h = vf.get_height();
-
-            // need to copy image here.
-            auto image = cv::Mat(cv::Size(w, h), imageFormatProperties.matType, (void*)f.get_data(), cv::Mat::AUTO_STEP).clone();
-
-            boost::shared_ptr< Vision::Image > pColorImage(new Vision::Image(image));
-            pColorImage->set_pixelFormat(imageFormatProperties.imageFormat);
-            pColorImage->set_origin(imageFormatProperties.origin);
-
-            if (m_autoGPUUpload) {
-                Vision::OpenCLManager &oclManager = Vision::OpenCLManager::singleton();
-                if (oclManager.isInitialized()) {
-                    //force upload to the GPU
-                    pColorImage->uMat();
-                }
-            }
-
-            m_outputPort.send(Measurement::ImageMeasurement(ts, pColorImage));
-
-            // should we add a grayImageOutputPort here ?
-
-        } else {
-            LOG4CPP_WARN(logger, "ignoring non-video frame received in RealsenseVideoComponent.");
-        }
-    }
-
-    void RealsensePointCloudComponent::handleFrame(Measurement::Timestamp ts, rs2::frame f) {
-        if (auto df = f.as<rs2::depth_frame>())
-        {
-            if (m_outputPort.isConnected()) {
-                // Declare pointcloud object, for calculating pointclouds and texture mappings
-                rs2::pointcloud pc;
-
-                // Generate the pointcloud and texture mappings
-                rs2::points points = pc.calculate(df);
-
-                // Tell pointcloud object to map to this color frame
-                // @todo: currently no access to the color image .. now sure how to achieve this with the current structure ..
-                // pc.map_to(color);
-
-
-                auto vertices = points.get_vertices();
-
-                Math::Vector3d init_pos(0, 0, 0);
-                boost::shared_ptr < std::vector<Math::Vector3d> > pPointCloud = boost::make_shared< std::vector<Math::Vector3d> >(points.size(), init_pos);
-
-                for (size_t i = 0; i < points.size(); i++) {
-                    Math::Vector3d& p = pPointCloud->at(i);
-
-                    if (vertices[i].z != 0.)
-                    {
-                        p[0] = vertices[i].x;
-                        p[1] = vertices[i].y;
-                        p[2] = vertices[i].z;
-                    } else {
-                        p[0] = p[1] = p[2] = 0.;
-                    }
-                }
-
-                m_outputPort.send(Measurement::PositionList(ts, pPointCloud));
-            }
-
-            if (m_outputDepthmapPort.isConnected()) {
-
-                auto imageFormatProperties = Vision::Image::ImageFormatProperties();
-                switch (f.get_profile().format()) {
-                    case RS2_FORMAT_Z16:
-                        imageFormatProperties.depth = CV_16U;
-                        imageFormatProperties.channels = 1;
-                        imageFormatProperties.matType = CV_16UC1;
-                        imageFormatProperties.bitsPerPixel = 16;
-                        imageFormatProperties.origin = 0;
-                        imageFormatProperties.imageFormat = Vision::Image::DEPTH;
-                        break;
-
-                    default:
-                        UBITRACK_THROW("Realsense frame format is not supported!");
-                }
-
-                int w = df.get_width();
-                int h = df.get_height();
-
-                // need to copy image here.
-                auto image = cv::Mat(cv::Size(w, h), imageFormatProperties.matType, (void*)f.get_data(), cv::Mat::AUTO_STEP).clone();
-
-                boost::shared_ptr< Vision::Image > pDepthImage(new Vision::Image(image));
-                pDepthImage->set_pixelFormat(imageFormatProperties.imageFormat);
-                pDepthImage->set_origin(imageFormatProperties.origin);
-
-                if (m_autoGPUUpload) {
-                    Vision::OpenCLManager &oclManager = Vision::OpenCLManager::singleton();
-                    if (oclManager.isInitialized()) {
-                        //force upload to the GPU
-                        pDepthImage->uMat();
-                    }
-                }
-
-                m_outputDepthmapPort.send(Measurement::ImageMeasurement(ts, pDepthImage));
-
-            }
-        }
-    }
-
 
 } } // namespace Ubitrack::Drivers
