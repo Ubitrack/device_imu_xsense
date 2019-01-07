@@ -24,6 +24,7 @@ class UbitrackCoreConan(ConanFile):
         "ubitrack_core:shared=True",
         "ubitrack_vision:shared=True",
         "ubitrack_dataflow:shared=True",
+        "librealsense:shared=True",
         )
 
     # all sources are deployed with the package
