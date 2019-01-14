@@ -149,7 +149,7 @@ namespace Ubitrack { namespace Drivers {
         , m_colorStreamFormat(rs2_format::RS2_FORMAT_BGR8)
         , m_infraredStreamFormat(rs2_format::RS2_FORMAT_Y16)
         , m_depthStreamFormat(rs2_format::RS2_FORMAT_Z16)
-        , m_serialNumber(0)
+        , m_serialNumber("")
         , m_depthLaserPower(150)
         , m_depthEmitterEnabled(1)
         , m_infraredGain(16)
@@ -161,7 +161,7 @@ namespace Ubitrack { namespace Drivers {
     {
 
         if (subgraph->m_DataflowAttributes.hasAttribute("rsSerialNumber")) {
-            subgraph->m_DataflowAttributes.getAttributeData("rsSerialNumber", m_serialNumber);
+            m_serialNumber = subgraph->m_DataflowAttributes.getAttributeString("rsSerialNumber");
         }
 
         if ( subgraph->m_DataflowAttributes.hasAttribute( "rsColorVideoResolution" ) )
@@ -279,29 +279,26 @@ namespace Ubitrack { namespace Drivers {
         bool found_device = false;
 
         // if serialnumber == 0 then use first device
-        if (m_serialNumber == 0) {
+        if (m_serialNumber == "") {
             m_dev = std::make_shared<rs2::device>(devices.front());
             found_device = true;
         } else {
+            LOG4CPP_INFO(logger, "Looking for realsense camera with serial number: " << m_serialNumber);
             for (auto i = 0; i < device_count; ++i)
             {
                 auto dev = devices[i];
                 // do we need to catch an exception here ?
                 std::string serial_number_string = devices[i].get_info(RS2_CAMERA_INFO_SERIAL_NUMBER);
-                try {
-                    int serial_number = std::stoi(serial_number_string);
-                    if (m_serialNumber == serial_number) {
+                LOG4CPP_DEBUG(logger, "Found realsense camera with serial number: " << serial_number_string);
+                if (serial_number_string.compare(m_serialNumber) == 0) {
                         m_dev = std::make_shared<rs2::device>(devices[i]);
                         found_device = true;
-                    }
-                } catch (std::exception &e) {
-                    LOG4CPP_ERROR(logger, "Error getting Realsense serial number (" << e.what() << ") expected: " << m_serialNumber << " found: " << serial_number_string);
                 }
             }
         }
 
         if (!found_device) {
-            UBITRACK_THROW("No Realsense camera with given serial number found");
+            UBITRACK_THROW("No Realsense camera with serial number found");
         }
 
         if (!m_stream_requests.empty()) {
