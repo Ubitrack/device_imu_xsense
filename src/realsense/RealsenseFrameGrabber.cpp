@@ -295,7 +295,7 @@ namespace Ubitrack { namespace Drivers {
                         found_device = true;
                     }
                 } catch (std::exception &e) {
-                    LOG4CPP_ERROR(logger, "Error getting Realsense serial number: " << e.what());
+                    LOG4CPP_ERROR(logger, "Error getting Realsense serial number (" << e.what() << ") expected: " << m_serialNumber << " found: " << serial_number_string);
                 }
             }
         }
