@@ -720,7 +720,7 @@ namespace Ubitrack { namespace Drivers {
                         {
                             p[0] = vertices[i].x;
                             p[1] = vertices[i].y;
-                            p[2] = vertices[i].z;
+                            p[2] = -vertices[i].z;
                         } else {
                             p[0] = p[1] = p[2] = 0.;
                         }
