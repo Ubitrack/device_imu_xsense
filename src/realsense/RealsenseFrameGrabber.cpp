@@ -287,10 +287,15 @@ namespace Ubitrack { namespace Drivers {
             {
                 auto dev = devices[i];
                 // do we need to catch an exception here ?
-                int serial_number = std::stoi(devices[i].get_info(RS2_CAMERA_INFO_SERIAL_NUMBER));
-                if (m_serialNumber == serial_number) {
-                    m_dev = std::make_shared<rs2::device>(devices[i]);
-                    found_device = true;
+                std::string serial_number_string = devices[i].get_info(RS2_CAMERA_INFO_SERIAL_NUMBER);
+                try {
+                    int serial_number = std::stoi(serial_number_string);
+                    if (m_serialNumber == serial_number) {
+                        m_dev = std::make_shared<rs2::device>(devices[i]);
+                        found_device = true;
+                    }
+                } catch (std::exception &e) {
+                    LOG4CPP_ERROR(logger, "Error getting Realsense serial number: " << e.what());
                 }
             }
         }
