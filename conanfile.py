@@ -17,7 +17,7 @@ class UbitrackCoreConan(ConanFile):
         "ubitrack_core/%s@ubitrack/stable" % version,
         "ubitrack_vision/%s@ubitrack/stable" % version,
         "ubitrack_dataflow/%s@ubitrack/stable" % version,
-        "librealsense/[=2.16.5]@camposs/stable",
+        "librealsense/[=2.17.1]@camposs/stable",
        )
 
     default_options = (

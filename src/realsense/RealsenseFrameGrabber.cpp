@@ -157,6 +157,7 @@ namespace Ubitrack { namespace Drivers {
         , m_haveIRLeftStream(false)
         , m_haveIRRightStream(false)
         , m_haveDepthStream(false)
+        , m_operation_mode(OPERATION_MODE_LIVESTREAM)
         , m_autoGPUUpload(false)
     {
 
@@ -198,6 +199,23 @@ namespace Ubitrack { namespace Drivers {
             m_depthImageWidth = std::get<0>(resolution);
             m_depthImageHeight = std::get<1>(resolution);
         }
+
+        if ( subgraph->m_DataflowAttributes.hasAttribute( "rsOperationMode" ) )
+        {
+            std::string sOperationMode = subgraph->m_DataflowAttributes.getAttributeString( "rsOperationMode" );
+            if ( realsenseOperationModeMap.find( sOperationMode ) == realsenseOperationModeMap.end() )
+                UBITRACK_THROW( "unknown operation mode: \"" + sOperationMode + "\"" );
+            m_operation_mode = realsenseOperationModeMap[ sOperationMode ];
+        }
+
+
+        if (subgraph->m_DataflowAttributes.hasAttribute("rsRosBagFilename")){
+            m_rosbag_filename = subgraph->m_DataflowAttributes.getAttributeString("rsRosBagFilename");
+        }
+        if (subgraph->m_DataflowAttributes.hasAttribute("rsTimestampFilename")){
+            m_timestamp_filename = subgraph->m_DataflowAttributes.getAttributeString("rsTimestampFilename");
+        }
+
 
         subgraph->m_DataflowAttributes.getAttributeData( "rsFrameRate", m_frameRate );
 
@@ -270,108 +288,84 @@ namespace Ubitrack { namespace Drivers {
 
     void RealsenseCameraComponent::setupDevice()
     {
-        auto devices = m_ctx.query_devices();
-        size_t device_count = devices.size();
-        if (!device_count) {
-            UBITRACK_THROW("No Realsense camera connected.");
+        m_pipeline_config = rs2::config();
+        m_pipeline = std::make_shared<rs2::pipeline>(m_ctx);
+
+        switch(m_operation_mode) {
+            case OPERATION_MODE_LIVESTREAM:
+                break;
+
+            case OPERATION_MODE_LIVESTREAM_RECORD:
+                m_pipeline_config.enable_record_to_file(m_rosbag_filename.string());
+                break;
+
+            case OPERATION_MODE_PLAYBACK:
+                m_pipeline_config.enable_device_from_file(m_rosbag_filename.string());
+                break;
         }
 
-        bool found_device = false;
-
-        // if serialnumber == 0 then use first device
-        if (m_serialNumber == 0) {
-            m_dev = std::make_shared<rs2::device>(devices.front());
-            found_device = true;
-        } else {
-            for (auto i = 0; i < device_count; ++i)
-            {
-                auto dev = devices[i];
-                // do we need to catch an exception here ?
-                int serial_number = std::stoi(devices[i].get_info(RS2_CAMERA_INFO_SERIAL_NUMBER));
-                if (m_serialNumber == serial_number) {
-                    m_dev = std::make_shared<rs2::device>(devices[i]);
-                    found_device = true;
-                }
+        if ((m_operation_mode == OPERATION_MODE_LIVESTREAM) || (m_operation_mode == OPERATION_MODE_LIVESTREAM_RECORD)) {
+            // if serialNumber != 0, ask for it and "reserve" it.
+            if (m_serialNumber != 0) {
+                m_pipeline_config.enable_device(std::to_string(m_serialNumber));
             }
         }
 
-        if (!found_device) {
-            UBITRACK_THROW("No Realsense camera with given serial number found");
+        for (auto i = 0; i < m_stream_requests.size() - 1; i++) {
+            m_pipeline_config.enable_stream(
+                    m_stream_requests[i]._stream_type, m_stream_requests[i]._stream_idx,
+                    m_stream_requests[i]._width, m_stream_requests[i]._height,
+                    m_stream_requests[i]._stream_format, m_stream_requests[i]._fps
+                    );
         }
 
-        if (!m_stream_requests.empty()) {
-            std::sort(m_stream_requests.begin(), m_stream_requests.end(),
-                      [](const stream_request &l, const stream_request &r) {
-                          return l._stream_type < r._stream_type;
-                      });
+        m_pipeline_profile = m_pipeline_config.resolve(*m_pipeline);
 
-            for (auto i = 0; i < m_stream_requests.size() - 1; i++) {
-                if ((m_stream_requests[i]._stream_type == m_stream_requests[i + 1]._stream_type) &&
-                    ((m_stream_requests[i]._stream_idx == m_stream_requests[i + 1]._stream_idx)))
-                    UBITRACK_THROW("Invalid configuration - multiple requests for the same sensor");
-            }
-        }
 
-        // configure sensors
+        // check sensor for compatible config and build map
         bool succeed = false;
-        std::vector<rs2::stream_profile> matches;
         size_t expected_number_of_streams = m_stream_requests.size();
         m_stream_profile_map.clear();
 
-        // Configure and starts streaming
-        for (auto&& sensor : m_dev->query_sensors())
-        {
-            for (auto& profile : sensor.get_stream_profiles())
-            {
+        for (auto&& sensor : m_pipeline_profile.get_device().query_sensors()) {
+            for (auto &profile : sensor.get_stream_profiles()) {
                 // All requests have been resolved
                 if (m_stream_requests.empty())
                     break;
 
                 // Find profile matches
                 auto fulfilled_request = std::find_if(m_stream_requests.begin(), m_stream_requests.end(),
-                        [&matches, profile, this](const stream_request& req)
-                    {
-                        bool res = false;
-                        if ((profile.stream_type() == req._stream_type) &&
-                            (profile.format() == req._stream_format) &&
-                            (profile.stream_index() == req._stream_idx) &&
-                            (profile.fps() == req._fps))
-                        {
-                            if (auto vp = profile.as<rs2::video_stream_profile>())
-                            {
-                                if ((vp.width() != req._width) || (vp.height() != req._height))
-                                    return false;
-                            }
-                            res = true;
-                            matches.emplace_back(profile);
-                            m_stream_profile_map[req._port_name] = profile;
-                        }
+                                                      [profile, this](const stream_request &req) {
+                                                          bool res = false;
+                                                          if ((profile.stream_type() == req._stream_type) &&
+                                                              (profile.format() == req._stream_format) &&
+                                                              (profile.stream_index() == req._stream_idx) &&
+                                                              (profile.fps() == req._fps)) {
+                                                              if (auto vp = profile.as<rs2::video_stream_profile>()) {
+                                                                  if ((vp.width() != req._width) ||
+                                                                      (vp.height() != req._height))
+                                                                      return false;
+                                                              }
+                                                              res = true;
+                                                              m_stream_profile_map[req._port_name] = profile;
+                                                          }
 
-                        return res;
-                    });
+                                                          return res;
+                                                      });
 
                 // Remove the request once resolved
                 if (fulfilled_request != m_stream_requests.end()) {
                     m_stream_requests.erase(fulfilled_request);
                 }
             }
-
-            // Aggregate resolved requests
-            if (!matches.empty())
-            {
-                std::copy(matches.begin(), matches.end(), std::back_inserter(m_selected_stream_profiles));
-                sensor.open(matches);
-                m_active_sensors.emplace_back(sensor);
-                matches.clear();
+            if (m_selected_stream_profiles.size() == expected_number_of_streams) {
+                LOG4CPP_INFO(logger, "Found matching Realsense device.");
+            } else {
+                UBITRACK_THROW("No matching Realsense device found");
             }
-
-            if (m_selected_stream_profiles.size() == expected_number_of_streams)
-                succeed = true;
         }
 
-        if (!succeed) {
-            UBITRACK_THROW("Could not find matching stream profiles for all components.");
-        }
+
     }
 
     void RealsenseCameraComponent::retrieveCalibration() {
@@ -579,8 +573,7 @@ namespace Ubitrack { namespace Drivers {
                 Auto Exposure Priority                             : 0    ... 1           1     0
          */
 
-
-        for (auto&& sensor : m_active_sensors) {
+        for (auto&& sensor : m_pipeline_profile.get_device().query_sensors()) {
             if (rs2::depth_sensor dpt_sensor = sensor.as<rs2::depth_sensor>())
             {
                 // depth sensor options
@@ -590,7 +583,6 @@ namespace Ubitrack { namespace Drivers {
             } else {
                 // color sensor options ?
             }
-
         }
     }
 
@@ -601,12 +593,10 @@ namespace Ubitrack { namespace Drivers {
         setOptions();
 
         // Start streaming
-        for (auto&& sensor : m_active_sensors) {
-            sensor.start([this](rs2::frame f)
-                         {
-                             handleFrame(f);
-                         });
-        }
+        m_pipeline->start(m_pipeline_config, [this](const rs2::frame& f)
+        {
+            handleFrame(f);
+        });
 
     }
 
@@ -762,10 +752,7 @@ namespace Ubitrack { namespace Drivers {
             m_running = false;
             LOG4CPP_INFO( logger, "Trying to stop Realsense module");
 
-            for (auto&& sensor : m_active_sensors) {
-                sensor.stop();
-                sensor.close();
-            }
+            m_pipeline->stop();
 
             teardownDevice();
         }
@@ -773,7 +760,7 @@ namespace Ubitrack { namespace Drivers {
 
     void RealsenseCameraComponent::teardownDevice()
     {
-        m_dev.reset();
+        m_pipeline.reset();
     }
 
 
