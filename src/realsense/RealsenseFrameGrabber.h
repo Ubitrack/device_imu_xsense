@@ -237,7 +237,7 @@ using namespace Dataflow;
         rs2_format m_infraredStreamFormat;
         rs2_format m_depthStreamFormat;
 
-        unsigned int m_serialNumber;
+        std::string m_serialNumber;
 
         unsigned int m_depthLaserPower;
         unsigned int m_depthEmitterEnabled;

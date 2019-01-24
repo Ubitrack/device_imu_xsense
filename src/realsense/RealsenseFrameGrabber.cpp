@@ -149,7 +149,7 @@ namespace Ubitrack { namespace Drivers {
         , m_colorStreamFormat(rs2_format::RS2_FORMAT_BGR8)
         , m_infraredStreamFormat(rs2_format::RS2_FORMAT_Y16)
         , m_depthStreamFormat(rs2_format::RS2_FORMAT_Z16)
-        , m_serialNumber(0)
+        , m_serialNumber("")
         , m_depthLaserPower(150)
         , m_depthEmitterEnabled(1)
         , m_infraredGain(16)
@@ -162,7 +162,7 @@ namespace Ubitrack { namespace Drivers {
     {
 
         if (subgraph->m_DataflowAttributes.hasAttribute("rsSerialNumber")) {
-            subgraph->m_DataflowAttributes.getAttributeData("rsSerialNumber", m_serialNumber);
+            m_serialNumber = subgraph->m_DataflowAttributes.getAttributeString("rsSerialNumber");
         }
 
         if ( subgraph->m_DataflowAttributes.hasAttribute( "rsColorVideoResolution" ) )
@@ -306,8 +306,9 @@ namespace Ubitrack { namespace Drivers {
 
         if ((m_operation_mode == OPERATION_MODE_LIVESTREAM) || (m_operation_mode == OPERATION_MODE_LIVESTREAM_RECORD)) {
             // if serialNumber != 0, ask for it and "reserve" it.
-            if (m_serialNumber != 0) {
-                m_pipeline_config.enable_device(std::to_string(m_serialNumber));
+            if (m_serialNumber != "") {
+                LOG4CPP_INFO(logger, "Require Realsense camera with serialnumber: " << m_serialNumber);
+                m_pipeline_config.enable_device(m_serialNumber);
             }
         }
 
@@ -319,8 +320,12 @@ namespace Ubitrack { namespace Drivers {
                     );
         }
 
-        m_pipeline_profile = m_pipeline_config.resolve(*m_pipeline);
-
+        try {
+            m_pipeline_profile = m_pipeline_config.resolve(*m_pipeline);
+        } catch(rs2::error &e) {
+            LOG4CPP_ERROR(logger, "Error while starting pipeline: " << e.what());
+            UBITRACK_THROW("Cannot setup realsense device");
+        }
 
         // check sensor for compatible config and build map
         bool succeed = false;

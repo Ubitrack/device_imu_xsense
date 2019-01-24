@@ -36,6 +36,7 @@ class UbitrackCoreConan(ConanFile):
        
     def build(self):
         cmake = CMake(self)
+        cmake.definitions["LIBREALSENSE_FILE_LIBNAME"] = self.deps_user_info["librealsense"].realsense_file_library_name
         cmake.configure()
         cmake.build()
         cmake.install()
