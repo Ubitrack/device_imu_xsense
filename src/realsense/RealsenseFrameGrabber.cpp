@@ -308,25 +308,21 @@ namespace Ubitrack { namespace Drivers {
                 break;
         }
 
-        if ((m_operation_mode == OPERATION_MODE_LIVESTREAM) || (m_operation_mode == OPERATION_MODE_LIVESTREAM_RECORD)) {
+        if (m_operation_mode != OPERATION_MODE_PLAYBACK) {
             // if serialNumber != 0, ask for it and "reserve" it.
             if (m_serialNumber != "") {
                 LOG4CPP_INFO(logger, "Require Realsense camera with serialnumber: " << m_serialNumber);
                 m_pipeline_config.enable_device(m_serialNumber);
             }
-        }
 
-
-        // this is disabled for now as it prevents the system to start
-        // per default it enables depth and color streams
-        // not sure about infrared left/right, etc streams.
-
-        for (auto i = 0; i < m_stream_requests.size() - 1; i++) {
-            m_pipeline_config.enable_stream(
-                    m_stream_requests[i]._stream_type, m_stream_requests[i]._stream_idx,
-                    m_stream_requests[i]._width, m_stream_requests[i]._height,
-                    m_stream_requests[i]._stream_format, m_stream_requests[i]._fps
-                    );
+            // only configure streams when accessing the sensor
+            for (auto i = 0; i < m_stream_requests.size() - 1; i++) {
+                m_pipeline_config.enable_stream(
+                        m_stream_requests[i]._stream_type, m_stream_requests[i]._stream_idx,
+                        m_stream_requests[i]._width, m_stream_requests[i]._height,
+                        m_stream_requests[i]._stream_format, m_stream_requests[i]._fps
+                );
+            }
         }
 
         try {
