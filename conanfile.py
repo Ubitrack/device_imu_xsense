@@ -17,7 +17,7 @@ class UbitrackCoreConan(ConanFile):
         "ubitrack_core/%s@ubitrack/stable" % version,
         "ubitrack_vision/%s@ubitrack/stable" % version,
         "ubitrack_dataflow/%s@ubitrack/stable" % version,
-        "librealsense/[=2.16.5]@camposs/stable",
+        "librealsense/[=2.17.1]@camposs/stable",
        )
 
     default_options = (
@@ -37,6 +37,7 @@ class UbitrackCoreConan(ConanFile):
        
     def build(self):
         cmake = CMake(self)
+        cmake.definitions["LIBREALSENSE_FILE_LIBNAME"] = self.deps_user_info["librealsense"].realsense_file_library_name
         cmake.configure()
         cmake.build()
         cmake.install()

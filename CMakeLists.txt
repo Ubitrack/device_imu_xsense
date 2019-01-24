@@ -12,6 +12,8 @@ conan_basic_setup(TARGETS)
 include(GNUInstallDirs)
 include(cmake/UbitrackConfig)
 
+OPTION(LIBREALSENSE_FILE_LIBNAME "Librealsense Library Filename" "")
+
 # External Libraries (could this be solved with conan dependencies ??)
 
 # OpenGL
