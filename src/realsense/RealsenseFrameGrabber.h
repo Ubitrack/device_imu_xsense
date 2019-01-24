@@ -206,12 +206,12 @@ using namespace Dataflow;
 
         bool m_haveColorStream;
         bool m_haveIRLeftStream;
-        bool m_haveIRRightStream;
+//        bool m_haveIRRightStream;
         bool m_haveDepthStream;
 
         Dataflow::PushSupplier <Measurement::ImageMeasurement> m_outputColorImagePort;
         Dataflow::PushSupplier <Measurement::ImageMeasurement> m_outputIRLeftImagePort;
-        Dataflow::PushSupplier <Measurement::ImageMeasurement> m_outputIRRightImagePort;
+//        Dataflow::PushSupplier <Measurement::ImageMeasurement> m_outputIRRightImagePort;
         Dataflow::PushSupplier <Measurement::ImageMeasurement> m_outputDepthMapImagePort;
         Dataflow::PushSupplier <Measurement::PositionList>     m_outputPointCloudPort;
 
@@ -219,10 +219,10 @@ using namespace Dataflow;
         Dataflow::PullSupplier <Measurement::Matrix3x3>        m_outputColorIntrinsicsMatrixPort;
         Dataflow::PullSupplier <Measurement::CameraIntrinsics> m_outputIRLeftCameraModelPort;
         Dataflow::PullSupplier <Measurement::Matrix3x3>        m_outputIRLeftIntrinsicsMatrixPort;
-        Dataflow::PullSupplier <Measurement::CameraIntrinsics> m_outputIRRightCameraModelPort;
-        Dataflow::PullSupplier <Measurement::Matrix3x3>        m_outputIRRightIntrinsicsMatrixPort;
+//        Dataflow::PullSupplier <Measurement::CameraIntrinsics> m_outputIRRightCameraModelPort;
+//        Dataflow::PullSupplier <Measurement::Matrix3x3>        m_outputIRRightIntrinsicsMatrixPort;
 
-        Dataflow::PullSupplier <Measurement::Pose> m_leftIRToRightIRTransformPort;
+//        Dataflow::PullSupplier <Measurement::Pose> m_leftIRToRightIRTransformPort;
         Dataflow::PullSupplier <Measurement::Pose> m_leftIRToColorTransformPort;
 
         // sensor configuration

@@ -16,14 +16,14 @@
             <Node name="IRCameraLeft" displayName="Left IR Camera" >
                 <Description><p xmlns="http://www.w3.org/1999/xhtml">Realsense Left IR Camera</p></Description>
             </Node>
-            <Node name="IRCameraRight" displayName="Right IR Camera" >
-                <Description><p xmlns="http://www.w3.org/1999/xhtml">Realsense Right IR Camera</p></Description>
-            </Node>
+            <!--<Node name="IRCameraRight" displayName="Right IR Camera" >-->
+                <!--<Description><p xmlns="http://www.w3.org/1999/xhtml">Realsense Right IR Camera</p></Description>-->
+            <!--</Node>-->
             <Node name="ColorCamera" displayName="Color Camera" >
                 <Description><p xmlns="http://www.w3.org/1999/xhtml">Realsense Color Camera</p></Description>
             </Node>
             <Node name="IRImagePlaneLeft" displayName="IR Image Plane Left" />
-            <Node name="IRImagePlaneRight" displayName="IR Image Plane Right" />
+            <!--<Node name="IRImagePlaneRight" displayName="IR Image Plane Right" />-->
             <Node name="ColorImagePlane" displayName="Color Image Plane" />
             <Node name="PointCloud" displayName="3D Point Cloud" />
 
@@ -63,27 +63,27 @@
                 <Attribute name="mode" value="push" xsi:type="EnumAttributeReferenceType"/>
             </Edge>
 
-            <Edge name="IRRightIntrinsics" source="IRCameraRight" destination="IRImagePlaneRight" displayName="IR Camera Intrinsics Right">
-                <Description>
-                    <h:p>The intrinsic IR camera matrix right.</h:p>
-                </Description>
-                <Attribute name="type" value="3x3Matrix" xsi:type="EnumAttributeReferenceType"/>
-                <Attribute name="mode" value="pull" xsi:type="EnumAttributeReferenceType"/>
-            </Edge>
-            <Edge name="RightCameraModel" source="IRCameraRight"    destination="IRImagePlaneRight" displayName="IR Camera Model Right">
-                <Description>
-                    <h:p>The IR camera model right.</h:p>
-                </Description>
-                <Attribute name="type" value="Intrinsics" xsi:type="EnumAttributeReferenceType"/>
-                <Attribute name="mode" value="pull" xsi:type="EnumAttributeReferenceType"/>
-            </Edge>
-            <Edge name="IRRightImageOutput" source="IRCameraRight" destination="IRImagePlaneRight" displayName="IR Image Right">
-                <Description>
-                    <h:p>The output image.</h:p>
-                </Description>
-                <Attribute name="type" value="Image" xsi:type="EnumAttributeReferenceType"/>
-                <Attribute name="mode" value="push" xsi:type="EnumAttributeReferenceType"/>
-            </Edge>
+            <!--<Edge name="IRRightIntrinsics" source="IRCameraRight" destination="IRImagePlaneRight" displayName="IR Camera Intrinsics Right">-->
+                <!--<Description>-->
+                    <!--<h:p>The intrinsic IR camera matrix right.</h:p>-->
+                <!--</Description>-->
+                <!--<Attribute name="type" value="3x3Matrix" xsi:type="EnumAttributeReferenceType"/>-->
+                <!--<Attribute name="mode" value="pull" xsi:type="EnumAttributeReferenceType"/>-->
+            <!--</Edge>-->
+            <!--<Edge name="RightCameraModel" source="IRCameraRight"    destination="IRImagePlaneRight" displayName="IR Camera Model Right">-->
+                <!--<Description>-->
+                    <!--<h:p>The IR camera model right.</h:p>-->
+                <!--</Description>-->
+                <!--<Attribute name="type" value="Intrinsics" xsi:type="EnumAttributeReferenceType"/>-->
+                <!--<Attribute name="mode" value="pull" xsi:type="EnumAttributeReferenceType"/>-->
+            <!--</Edge>-->
+            <!--<Edge name="IRRightImageOutput" source="IRCameraRight" destination="IRImagePlaneRight" displayName="IR Image Right">-->
+                <!--<Description>-->
+                    <!--<h:p>The output image.</h:p>-->
+                <!--</Description>-->
+                <!--<Attribute name="type" value="Image" xsi:type="EnumAttributeReferenceType"/>-->
+                <!--<Attribute name="mode" value="push" xsi:type="EnumAttributeReferenceType"/>-->
+            <!--</Edge>-->
 
             <Edge name="ColorIntrinsics" source="ColorCamera" destination="ColorImagePlane" displayName="Color Camera Intrinsics Right">
                 <Description>
@@ -107,13 +107,13 @@
                 <Attribute name="mode" value="push" xsi:type="EnumAttributeReferenceType"/>
             </Edge>
 
-            <Edge name="LeftToRightTransform" source="IRCameraLeft" destination="IRCameraRight" displayName="IR Camera Left To Right Transform">
-                <Description>
-                    <h:p>The left IR camera to right IR camera transform.</h:p>
-                </Description>
-                <Attribute name="type" value="6D" xsi:type="EnumAttributeReferenceType"/>
-                <Attribute name="mode" value="pull" xsi:type="EnumAttributeReferenceType"/>
-            </Edge>
+            <!--<Edge name="LeftToRightTransform" source="IRCameraLeft" destination="IRCameraRight" displayName="IR Camera Left To Right Transform">-->
+                <!--<Description>-->
+                    <!--<h:p>The left IR camera to right IR camera transform.</h:p>-->
+                <!--</Description>-->
+                <!--<Attribute name="type" value="6D" xsi:type="EnumAttributeReferenceType"/>-->
+                <!--<Attribute name="mode" value="pull" xsi:type="EnumAttributeReferenceType"/>-->
+            <!--</Edge>-->
             <Edge name="LeftToColorTransform" source="IRCameraLeft" destination="ColorCamera" displayName="IR Camera Left To Color Camera Transform">
                 <Description>
                     <h:p>The left IR camera to color camera transform.</h:p>

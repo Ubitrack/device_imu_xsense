@@ -50,6 +50,10 @@ using namespace Ubitrack;
 using namespace Ubitrack::Vision;
 using namespace Ubitrack::Drivers;
 
+bool profile_contains_stream(std::map<std::string, rs2::stream_profile>& map, std::string key) {
+    return (map.find(key) != map.end());
+}
+
 Ubitrack::Vision::Image::ImageFormatProperties getImageFormatPropertiesFromRS2Frame(rs2::frame& f) {
     auto imageFormatProperties = Vision::Image::ImageFormatProperties();
     switch (f.get_profile().format()) {
@@ -129,16 +133,16 @@ namespace Ubitrack { namespace Drivers {
         : Dataflow::Component( sName )
         , m_outputColorImagePort("ColorImageOutput", *this)
         , m_outputIRLeftImagePort("IRLeftImageOutput", *this)
-        , m_outputIRRightImagePort("IRRightImageOutput", *this)
+//        , m_outputIRRightImagePort("IRRightImageOutput", *this)
         , m_outputDepthMapImagePort("DepthImageOutput", *this)
         , m_outputPointCloudPort("PointCloudOutput", *this)
         , m_outputColorCameraModelPort("ColorCameraModel", *this, boost::bind(&RealsenseCameraComponent::getColorCameraModel, this, _1))
         , m_outputColorIntrinsicsMatrixPort("ColorIntrinsics", *this, boost::bind(&RealsenseCameraComponent::getColorIntrinsic, this, _1))
         , m_outputIRLeftCameraModelPort("IRLeftCameraModel", *this, boost::bind(&RealsenseCameraComponent::getIRLeftCameraModel, this, _1))
         , m_outputIRLeftIntrinsicsMatrixPort("IRLeftIntrinsics", *this, boost::bind(&RealsenseCameraComponent::getIRLeftIntrinsic, this, _1))
-        , m_outputIRRightCameraModelPort("RightCameraModel", *this, boost::bind(&RealsenseCameraComponent::getIRRightCameraModel, this, _1))
-        , m_outputIRRightIntrinsicsMatrixPort("IRRightIntrinsics", *this, boost::bind(&RealsenseCameraComponent::getIRRightIntrinsic, this, _1))
-        , m_leftIRToRightIRTransformPort("LeftToRightTransform", *this, boost::bind(&RealsenseCameraComponent::getLeftToRightTransform, this, _1))
+//        , m_outputIRRightCameraModelPort("RightCameraModel", *this, boost::bind(&RealsenseCameraComponent::getIRRightCameraModel, this, _1))
+//        , m_outputIRRightIntrinsicsMatrixPort("IRRightIntrinsics", *this, boost::bind(&RealsenseCameraComponent::getIRRightIntrinsic, this, _1))
+//        , m_leftIRToRightIRTransformPort("LeftToRightTransform", *this, boost::bind(&RealsenseCameraComponent::getLeftToRightTransform, this, _1))
         , m_leftIRToColorTransformPort("LeftToColorTransform", *this, boost::bind(&RealsenseCameraComponent::getLeftToColorTransform, this, _1))
 
         , m_colorImageWidth(0)
@@ -155,7 +159,7 @@ namespace Ubitrack { namespace Drivers {
         , m_infraredGain(16)
         , m_haveColorStream(false)
         , m_haveIRLeftStream(false)
-        , m_haveIRRightStream(false)
+//        , m_haveIRRightStream(false)
         , m_haveDepthStream(false)
         , m_operation_mode(OPERATION_MODE_LIVESTREAM)
         , m_autoGPUUpload(false)
@@ -241,14 +245,14 @@ namespace Ubitrack { namespace Drivers {
             m_haveIRLeftStream = true;
         }
 
-        if (subgraph->hasEdge("IRRightImageOutput")) {
-            LOG4CPP_INFO(logger, "Activate Right Infrared Stream.");
-            m_stream_requests.push_back(
-                    {rs2_stream::RS2_STREAM_INFRARED, m_infraredStreamFormat, m_depthImageWidth,
-                     m_depthImageHeight, m_frameRate, 2, "IRRightImageOutput"});
-            m_haveIRRightStream = true;
-        }
-
+//        if (subgraph->hasEdge("IRRightImageOutput")) {
+//            LOG4CPP_INFO(logger, "Activate Right Infrared Stream.");
+//            m_stream_requests.push_back(
+//                    {rs2_stream::RS2_STREAM_INFRARED, m_infraredStreamFormat, m_depthImageWidth,
+//                     m_depthImageHeight, m_frameRate, 2, "IRRightImageOutput"});
+//            m_haveIRRightStream = true;
+//        }
+//
         if (subgraph->hasEdge("DepthImageOutput") || subgraph->hasEdge("PointCloudOutput")) {
             LOG4CPP_INFO(logger, "Activate Depth Stream.");
             m_stream_requests.push_back(
@@ -312,6 +316,11 @@ namespace Ubitrack { namespace Drivers {
             }
         }
 
+
+        // this is disabled for now as it prevents the system to start
+        // per default it enables depth and color streams
+        // not sure about infrared left/right, etc streams.
+
         for (auto i = 0; i < m_stream_requests.size() - 1; i++) {
             m_pipeline_config.enable_stream(
                     m_stream_requests[i]._stream_type, m_stream_requests[i]._stream_idx,
@@ -353,6 +362,7 @@ namespace Ubitrack { namespace Drivers {
                                                               }
                                                               res = true;
                                                               m_stream_profile_map[req._port_name] = profile;
+                                                              LOG4CPP_DEBUG(logger, "Realsense camera streamprofile found for: " << req._port_name);
                                                           }
 
                                                           return res;
@@ -363,19 +373,18 @@ namespace Ubitrack { namespace Drivers {
                     m_stream_requests.erase(fulfilled_request);
                 }
             }
-            if (m_selected_stream_profiles.size() == expected_number_of_streams) {
-                LOG4CPP_INFO(logger, "Found matching Realsense device.");
-            } else {
-                UBITRACK_THROW("No matching Realsense device found");
-            }
         }
 
-
+        if (m_selected_stream_profiles.size() == expected_number_of_streams) {
+            LOG4CPP_INFO(logger, "Found matching Realsense device.");
+        } else {
+            LOG4CPP_WARN(logger, "Not all stream requests could be satisfied !!!");
+        }
     }
 
     void RealsenseCameraComponent::retrieveCalibration() {
         // @todo get_intrinsics could throw exception .. should be handled.
-        if (m_haveColorStream) {
+        if ((m_haveColorStream) && (profile_contains_stream(m_stream_profile_map, "ColorImageOutput"))) {
             auto& stream_profile = m_stream_profile_map["ColorImageOutput"];
             if (auto vp = stream_profile.as<rs2::video_stream_profile>()) {
                 rs2_intrinsics intr = vp.get_intrinsics();
@@ -403,7 +412,31 @@ namespace Ubitrack { namespace Drivers {
             m_colorCameraModel = Math::CameraIntrinsics<double>();
         }
 
-        if (m_haveIRLeftStream) {
+        if ((m_haveDepthStream) && (profile_contains_stream(m_stream_profile_map, "DepthImageOutput"))) {
+            auto& stream_profile = m_stream_profile_map["DepthImageOutput"];
+            if (auto vp = stream_profile.as<rs2::video_stream_profile>()) {
+                rs2_intrinsics intr = vp.get_intrinsics();
+
+                Math::Matrix< double, 3, 3 > intrinsicMatrix = Math::Matrix3x3d::identity();
+                intrinsicMatrix(0, 0) = intr.fx;
+                intrinsicMatrix(1, 1) = intr.fy;
+                intrinsicMatrix(0, 2) = -intr.ppx;
+                intrinsicMatrix(1, 2) = -intr.ppy;
+                intrinsicMatrix(2, 2) = -1.0;
+
+                // [ k1, k2, p1, p2, k3 ]
+                Math::Vector< double, 3 > radial(intr.coeffs[0],
+                                                 intr.coeffs[1],
+                                                 intr.coeffs[4]);
+                Math::Vector< double, 2 > tangential(intr.coeffs[2],
+                                                     intr.coeffs[3]);
+                auto width = (std::size_t)intr.width;
+                auto height = (std::size_t)intr.height;
+
+                m_infraredLeftCameraModel = Math::CameraIntrinsics<double>(intrinsicMatrix, radial, tangential, width, height);
+                LOG4CPP_DEBUG(logger, "IR Left Camera Model: " << m_infraredLeftCameraModel);
+            }
+        } else if ((m_haveIRLeftStream) && (profile_contains_stream(m_stream_profile_map, "IRLeftImageOutput"))) {
             auto& stream_profile = m_stream_profile_map["IRLeftImageOutput"];
             if (auto vp = stream_profile.as<rs2::video_stream_profile>()) {
                 rs2_intrinsics intr = vp.get_intrinsics();
@@ -431,71 +464,71 @@ namespace Ubitrack { namespace Drivers {
             m_infraredLeftCameraModel = Math::CameraIntrinsics<double>();
         }
 
-        if (m_haveIRRightStream) {
-            auto& stream_profile = m_stream_profile_map["IRRightImageOutput"];
-            if (auto vp = stream_profile.as<rs2::video_stream_profile>()) {
-                rs2_intrinsics intr = vp.get_intrinsics();
+//        if ((m_haveIRRightStream) && (profile_contains_stream(m_stream_profile_map, "IRRightImageOutput"))) {
+//            auto& stream_profile = m_stream_profile_map["IRRightImageOutput"];
+//            if (auto vp = stream_profile.as<rs2::video_stream_profile>()) {
+//                rs2_intrinsics intr = vp.get_intrinsics();
+//
+//                Math::Matrix< double, 3, 3 > intrinsicMatrix = Math::Matrix3x3d::identity();
+//                intrinsicMatrix(0, 0) = intr.fx;
+//                intrinsicMatrix(1, 1) = intr.fy;
+//                intrinsicMatrix(0, 2) = -intr.ppx;
+//                intrinsicMatrix(1, 2) = -intr.ppy;
+//                intrinsicMatrix(2, 2) = -1.0;
+//
+//                // [ k1, k2, p1, p2, k3 ]
+//                Math::Vector< double, 3 > radial(intr.coeffs[0],
+//                                                 intr.coeffs[1],
+//                                                 intr.coeffs[4]);
+//                Math::Vector< double, 2 > tangential(intr.coeffs[2],
+//                                                     intr.coeffs[3]);
+//                auto width = (std::size_t)intr.width;
+//                auto height = (std::size_t)intr.height;
+//
+//                m_infraredRightCameraModel = Math::CameraIntrinsics<double>(intrinsicMatrix, radial, tangential, width, height);
+//                LOG4CPP_DEBUG(logger, "IR Right Camera Model: " << m_infraredRightCameraModel);
+//            }
+//        } else {
+//            m_infraredRightCameraModel = Math::CameraIntrinsics<double>();
+//        }
 
-                Math::Matrix< double, 3, 3 > intrinsicMatrix = Math::Matrix3x3d::identity();
-                intrinsicMatrix(0, 0) = intr.fx;
-                intrinsicMatrix(1, 1) = intr.fy;
-                intrinsicMatrix(0, 2) = -intr.ppx;
-                intrinsicMatrix(1, 2) = -intr.ppy;
-                intrinsicMatrix(2, 2) = -1.0;
 
-                // [ k1, k2, p1, p2, k3 ]
-                Math::Vector< double, 3 > radial(intr.coeffs[0],
-                                                 intr.coeffs[1],
-                                                 intr.coeffs[4]);
-                Math::Vector< double, 2 > tangential(intr.coeffs[2],
-                                                     intr.coeffs[3]);
-                auto width = (std::size_t)intr.width;
-                auto height = (std::size_t)intr.height;
-
-                m_infraredRightCameraModel = Math::CameraIntrinsics<double>(intrinsicMatrix, radial, tangential, width, height);
-                LOG4CPP_DEBUG(logger, "IR Right Camera Model: " << m_infraredRightCameraModel);
-            }
-        } else {
-            m_infraredRightCameraModel = Math::CameraIntrinsics<double>();
-        }
-
-
-        if (m_haveIRLeftStream && m_haveIRRightStream) {
-            auto& left_stream_profile = m_stream_profile_map["IRLeftImageOutput"];
-            auto& right_stream_profile = m_stream_profile_map["IRRightImageOutput"];
-            auto left2right = left_stream_profile.get_extrinsics_to(right_stream_profile);
-            auto rot_mat = Math::Matrix3x3d::identity();
-
-            // librealsense and ubitrack store matrices column-major
-            rot_mat( 0, 0 ) = left2right.rotation[0];
-            rot_mat( 1, 0 ) = left2right.rotation[3];
-            rot_mat( 2, 0 ) = left2right.rotation[6];
-
-            rot_mat( 0, 1 ) = left2right.rotation[1];
-            rot_mat( 1, 1 ) = left2right.rotation[4];
-            rot_mat( 2, 1 ) = left2right.rotation[7];
-
-            rot_mat( 0, 2 ) = left2right.rotation[2];
-            rot_mat( 1, 2 ) = left2right.rotation[5];
-            rot_mat( 2, 2 ) = left2right.rotation[8];
-
-            Math::Quaternion ut_quat(rot_mat);
-
-            Math::Vector3d ut_trans(
-                    (double)left2right.translation[0],
-                    (double)left2right.translation[1],
-                    (double)left2right.translation[2]
-                    );
-            m_leftToRightTransform = Math::Pose(ut_quat, ut_trans);
-            LOG4CPP_DEBUG(logger, "IR Left2Right Transform: " << m_leftToRightTransform);
-        } else {
-            m_leftToRightTransform = Math::Pose();
-        }
+//        if (m_haveIRLeftStream && m_haveIRRightStream) {
+//            auto& left_stream_profile = m_stream_profile_map["IRLeftImageOutput"];
+//            auto& right_stream_profile = m_stream_profile_map["IRRightImageOutput"];
+//            auto left2right = left_stream_profile.get_extrinsics_to(right_stream_profile);
+//            auto rot_mat = Math::Matrix3x3d::identity();
+//
+//            // librealsense and ubitrack store matrices column-major
+//            rot_mat( 0, 0 ) = left2right.rotation[0];
+//            rot_mat( 1, 0 ) = left2right.rotation[3];
+//            rot_mat( 2, 0 ) = left2right.rotation[6];
+//
+//            rot_mat( 0, 1 ) = left2right.rotation[1];
+//            rot_mat( 1, 1 ) = left2right.rotation[4];
+//            rot_mat( 2, 1 ) = left2right.rotation[7];
+//
+//            rot_mat( 0, 2 ) = left2right.rotation[2];
+//            rot_mat( 1, 2 ) = left2right.rotation[5];
+//            rot_mat( 2, 2 ) = left2right.rotation[8];
+//
+//            Math::Quaternion ut_quat(rot_mat);
+//
+//            Math::Vector3d ut_trans(
+//                    (double)left2right.translation[0],
+//                    (double)left2right.translation[1],
+//                    (double)left2right.translation[2]
+//                    );
+//            m_leftToRightTransform = Math::Pose(ut_quat, ut_trans);
+//            LOG4CPP_DEBUG(logger, "IR Left2Right Transform: " << m_leftToRightTransform);
+//        } else {
+//            m_leftToRightTransform = Math::Pose();
+//        }
 
         // only one of the two streams leftIR or depth might be available
         // the available models had identical calibration values, so we take either
         if ((m_haveIRLeftStream || m_haveDepthStream) && m_haveColorStream) {
-            auto& left_stream_profile = m_haveIRLeftStream ? m_stream_profile_map["IRLeftImageOutput"] : m_stream_profile_map["DepthImageOutput"];
+            auto& left_stream_profile = m_haveDepthStream ? m_stream_profile_map["DepthImageOutput"] : m_stream_profile_map["IRLeftImageOutput"];
             auto& color_stream_profile = m_stream_profile_map["ColorImageOutput"];
             auto left2color = left_stream_profile.get_extrinsics_to(color_stream_profile);
             auto rot_mat = Math::Matrix3x3d::identity();
@@ -669,20 +702,20 @@ namespace Ubitrack { namespace Drivers {
                 }
 
                 // Right IR Image
-                if (m_outputIRRightImagePort.isConnected() && (stream_index == 2)) {
-                    boost::shared_ptr<Vision::Image> pInfraredImage(new Vision::Image(image));
-                    pInfraredImage->set_pixelFormat(imageFormatProperties.imageFormat);
-                    pInfraredImage->set_origin(imageFormatProperties.origin);
-
-                    if (m_autoGPUUpload) {
-                        Vision::OpenCLManager &oclManager = Vision::OpenCLManager::singleton();
-                        if (oclManager.isInitialized()) {
-                            //force upload to the GPU
-                            pInfraredImage->uMat();
-                        }
-                    }
-                    m_outputIRRightImagePort.send(Measurement::ImageMeasurement(ts, pInfraredImage));
-                }
+//                if (m_outputIRRightImagePort.isConnected() && (stream_index == 2)) {
+//                    boost::shared_ptr<Vision::Image> pInfraredImage(new Vision::Image(image));
+//                    pInfraredImage->set_pixelFormat(imageFormatProperties.imageFormat);
+//                    pInfraredImage->set_origin(imageFormatProperties.origin);
+//
+//                    if (m_autoGPUUpload) {
+//                        Vision::OpenCLManager &oclManager = Vision::OpenCLManager::singleton();
+//                        if (oclManager.isInitialized()) {
+//                            //force upload to the GPU
+//                            pInfraredImage->uMat();
+//                        }
+//                    }
+//                    m_outputIRRightImagePort.send(Measurement::ImageMeasurement(ts, pInfraredImage));
+//                }
             }
         } else if (stream_type == rs2_stream::RS2_STREAM_DEPTH) {
             if (auto df = f.as<rs2::depth_frame>())
