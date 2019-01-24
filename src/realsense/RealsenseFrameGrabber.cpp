@@ -54,7 +54,7 @@ bool profile_contains_stream(std::map<std::string, rs2::stream_profile>& map, st
     return (map.find(key) != map.end());
 }
 
-Ubitrack::Vision::Image::ImageFormatProperties getImageFormatPropertiesFromRS2Frame(rs2::frame& f) {
+Ubitrack::Vision::Image::ImageFormatProperties getImageFormatPropertiesFromRS2Frame(const rs2::frame& f) {
     auto imageFormatProperties = Vision::Image::ImageFormatProperties();
     switch (f.get_profile().format()) {
         case RS2_FORMAT_BGRA8:
@@ -638,72 +638,76 @@ namespace Ubitrack { namespace Drivers {
 
     }
 
-    void RealsenseCameraComponent::handleFrame(rs2::frame f) {
+    void RealsenseCameraComponent::handleFrame(rs2::frame frame) {
 
         // convert from frame timestamp (milliseconds, double) to Measurement::Timestamp (nanoseconds, unsigned long long)
-        auto ts = (Measurement::Timestamp)(f.get_timestamp() * 1000000);
+        auto ts = (Measurement::Timestamp)(frame.get_timestamp() * 1000000);
 
-        rs2_stream stream_type = f.get_profile().stream_type();
-        int stream_index = f.get_profile().stream_index();
+        if (rs2::frameset fs = frame.as<rs2::frameset>())
+        {
+            // With callbacks, all synchronized stream will arrive in a single frameset
+            for (const rs2::frame& f : fs) {
+                rs2_stream stream_type = f.get_profile().stream_type();
+                int stream_index = f.get_profile().stream_index();
 
-        LOG4CPP_TRACE(logger, "Received Frame type: " << stream_type << " idx: " << stream_index);
+                LOG4CPP_TRACE(logger, "Received Frame type: " << stream_type << " idx: " << stream_index);
 
-        if (stream_type == rs2_stream::RS2_STREAM_COLOR) {
-            if (auto vf = f.as<rs2::video_frame>()) {
-                auto imageFormatProperties = getImageFormatPropertiesFromRS2Frame(f);
+                if (stream_type == rs2_stream::RS2_STREAM_COLOR) {
+                    if (auto vf = f.as<rs2::video_frame>()) {
+                        auto imageFormatProperties = getImageFormatPropertiesFromRS2Frame(f);
 
-                int w = vf.get_width();
-                int h = vf.get_height();
+                        int w = vf.get_width();
+                        int h = vf.get_height();
 
-                // need to copy image here.
-                auto image = cv::Mat(cv::Size(w, h), imageFormatProperties.matType, (void *) f.get_data(),
-                                     cv::Mat::AUTO_STEP).clone();
+                        // need to copy image here.
+                        auto image = cv::Mat(cv::Size(w, h), imageFormatProperties.matType, (void *) f.get_data(),
+                                             cv::Mat::AUTO_STEP).clone();
 
-                if (m_outputColorImagePort.isConnected()) {
-                    boost::shared_ptr<Vision::Image> pColorImage(new Vision::Image(image));
-                    pColorImage->set_pixelFormat(imageFormatProperties.imageFormat);
-                    pColorImage->set_origin(imageFormatProperties.origin);
+                        if (m_outputColorImagePort.isConnected()) {
+                            boost::shared_ptr<Vision::Image> pColorImage(new Vision::Image(image));
+                            pColorImage->set_pixelFormat(imageFormatProperties.imageFormat);
+                            pColorImage->set_origin(imageFormatProperties.origin);
 
-                    if (m_autoGPUUpload) {
-                        Vision::OpenCLManager &oclManager = Vision::OpenCLManager::singleton();
-                        if (oclManager.isInitialized()) {
-                            //force upload to the GPU
-                            pColorImage->uMat();
+                            if (m_autoGPUUpload) {
+                                Vision::OpenCLManager &oclManager = Vision::OpenCLManager::singleton();
+                                if (oclManager.isInitialized()) {
+                                    //force upload to the GPU
+                                    pColorImage->uMat();
+                                }
+                            }
+                            m_outputColorImagePort.send(Measurement::ImageMeasurement(ts, pColorImage));
                         }
+                    } else {
+                        LOG4CPP_WARN(logger, "Expected Video-Frame but cannot cast.");
                     }
-                    m_outputColorImagePort.send(Measurement::ImageMeasurement(ts, pColorImage));
-                }
-            } else {
-                LOG4CPP_WARN(logger, "Expected Video-Frame but cannot cast.");
-            }
-        } else if (stream_type == rs2_stream::RS2_STREAM_INFRARED) {
-            if (auto vf = f.as<rs2::video_frame>()) {
-                auto imageFormatProperties = getImageFormatPropertiesFromRS2Frame(f);
+                } else if (stream_type == rs2_stream::RS2_STREAM_INFRARED) {
+                    if (auto vf = f.as<rs2::video_frame>()) {
+                        auto imageFormatProperties = getImageFormatPropertiesFromRS2Frame(f);
 
-                int w = vf.get_width();
-                int h = vf.get_height();
+                        int w = vf.get_width();
+                        int h = vf.get_height();
 
-                // need to copy image here.
-                auto image = cv::Mat(cv::Size(w, h), imageFormatProperties.matType, (void *) f.get_data(),
-                                     cv::Mat::AUTO_STEP).clone();
+                        // need to copy image here.
+                        auto image = cv::Mat(cv::Size(w, h), imageFormatProperties.matType, (void *) f.get_data(),
+                                             cv::Mat::AUTO_STEP).clone();
 
-                // Left IR Image
-                if (m_outputIRLeftImagePort.isConnected() && (stream_index == 1)) {
-                    boost::shared_ptr<Vision::Image> pInfraredImage(new Vision::Image(image));
-                    pInfraredImage->set_pixelFormat(imageFormatProperties.imageFormat);
-                    pInfraredImage->set_origin(imageFormatProperties.origin);
+                        // Left IR Image
+                        if (m_outputIRLeftImagePort.isConnected() && (stream_index == 1)) {
+                            boost::shared_ptr<Vision::Image> pInfraredImage(new Vision::Image(image));
+                            pInfraredImage->set_pixelFormat(imageFormatProperties.imageFormat);
+                            pInfraredImage->set_origin(imageFormatProperties.origin);
 
-                    if (m_autoGPUUpload) {
-                        Vision::OpenCLManager &oclManager = Vision::OpenCLManager::singleton();
-                        if (oclManager.isInitialized()) {
-                            //force upload to the GPU
-                            pInfraredImage->uMat();
+                            if (m_autoGPUUpload) {
+                                Vision::OpenCLManager &oclManager = Vision::OpenCLManager::singleton();
+                                if (oclManager.isInitialized()) {
+                                    //force upload to the GPU
+                                    pInfraredImage->uMat();
+                                }
+                            }
+                            m_outputIRLeftImagePort.send(Measurement::ImageMeasurement(ts, pInfraredImage));
                         }
-                    }
-                    m_outputIRLeftImagePort.send(Measurement::ImageMeasurement(ts, pInfraredImage));
-                }
 
-                // Right IR Image
+                        // Right IR Image
 //                if (m_outputIRRightImagePort.isConnected() && (stream_index == 2)) {
 //                    boost::shared_ptr<Vision::Image> pInfraredImage(new Vision::Image(image));
 //                    pInfraredImage->set_pixelFormat(imageFormatProperties.imageFormat);
@@ -718,71 +722,71 @@ namespace Ubitrack { namespace Drivers {
 //                    }
 //                    m_outputIRRightImagePort.send(Measurement::ImageMeasurement(ts, pInfraredImage));
 //                }
-            }
-        } else if (stream_type == rs2_stream::RS2_STREAM_DEPTH) {
-            if (auto df = f.as<rs2::depth_frame>())
-            {
-                if (m_outputPointCloudPort.isConnected()) {
-                    // Declare pointcloud object, for calculating pointclouds and texture mappings
-                    rs2::pointcloud pc;
+                    }
+                } else if (stream_type == rs2_stream::RS2_STREAM_DEPTH) {
+                    if (auto df = f.as<rs2::depth_frame>())
+                    {
+                        if (m_outputPointCloudPort.isConnected()) {
+                            // Declare pointcloud object, for calculating pointclouds and texture mappings
+                            rs2::pointcloud pc;
 
-                    // Generate the pointcloud and texture mappings
-                    rs2::points points = pc.calculate(df);
+                            // Generate the pointcloud and texture mappings
+                            rs2::points points = pc.calculate(df);
 
-                    // Tell pointcloud object to map to this color frame
-                    // @todo: currently no access to the color image .. now sure how to achieve this with the current structure ..
-                    // pc.map_to(color);
+                            // Tell pointcloud object to map to this color frame
+                            // @todo: currently no access to the color image .. now sure how to achieve this with the current structure ..
+                            // pc.map_to(color);
 
-                    auto vertices = points.get_vertices();
+                            auto vertices = points.get_vertices();
 
-                    Math::Vector3d init_pos(0, 0, 0);
-                    boost::shared_ptr < std::vector<Math::Vector3d> > pPointCloud = boost::make_shared< std::vector<Math::Vector3d> >(points.size(), init_pos);
+                            Math::Vector3d init_pos(0, 0, 0);
+                            boost::shared_ptr < std::vector<Math::Vector3d> > pPointCloud = boost::make_shared< std::vector<Math::Vector3d> >(points.size(), init_pos);
 
-                    for (size_t i = 0; i < points.size(); i++) {
-                        Math::Vector3d& p = pPointCloud->at(i);
+                            for (size_t i = 0; i < points.size(); i++) {
+                                Math::Vector3d& p = pPointCloud->at(i);
 
-                        if (vertices[i].z != 0.)
-                        {
-                            p[0] = vertices[i].x;
-                            p[1] = vertices[i].y;
-                            p[2] = vertices[i].z;
-                        } else {
-                            p[0] = p[1] = p[2] = 0.;
+                                if (vertices[i].z != 0.)
+                                {
+                                    p[0] = vertices[i].x;
+                                    p[1] = vertices[i].y;
+                                    p[2] = vertices[i].z;
+                                } else {
+                                    p[0] = p[1] = p[2] = 0.;
+                                }
+                            }
+                            m_outputPointCloudPort.send(Measurement::PositionList(ts, pPointCloud));
+                        }
+
+                        if (m_outputDepthMapImagePort.isConnected()) {
+
+                            auto imageFormatProperties = getImageFormatPropertiesFromRS2Frame(f);
+
+                            int w = df.get_width();
+                            int h = df.get_height();
+
+                            // need to copy image here.
+                            auto image = cv::Mat(cv::Size(w, h), imageFormatProperties.matType, (void*)f.get_data(), cv::Mat::AUTO_STEP).clone();
+
+                            boost::shared_ptr< Vision::Image > pDepthImage(new Vision::Image(image));
+                            pDepthImage->set_pixelFormat(imageFormatProperties.imageFormat);
+                            pDepthImage->set_origin(imageFormatProperties.origin);
+
+                            if (m_autoGPUUpload) {
+                                Vision::OpenCLManager &oclManager = Vision::OpenCLManager::singleton();
+                                if (oclManager.isInitialized()) {
+                                    //force upload to the GPU
+                                    pDepthImage->uMat();
+                                }
+                            }
+                            m_outputDepthMapImagePort.send(Measurement::ImageMeasurement(ts, pDepthImage));
                         }
                     }
-                    m_outputPointCloudPort.send(Measurement::PositionList(ts, pPointCloud));
-                }
 
-                if (m_outputDepthMapImagePort.isConnected()) {
-
-                    auto imageFormatProperties = getImageFormatPropertiesFromRS2Frame(f);
-
-                    int w = df.get_width();
-                    int h = df.get_height();
-
-                    // need to copy image here.
-                    auto image = cv::Mat(cv::Size(w, h), imageFormatProperties.matType, (void*)f.get_data(), cv::Mat::AUTO_STEP).clone();
-
-                    boost::shared_ptr< Vision::Image > pDepthImage(new Vision::Image(image));
-                    pDepthImage->set_pixelFormat(imageFormatProperties.imageFormat);
-                    pDepthImage->set_origin(imageFormatProperties.origin);
-
-                    if (m_autoGPUUpload) {
-                        Vision::OpenCLManager &oclManager = Vision::OpenCLManager::singleton();
-                        if (oclManager.isInitialized()) {
-                            //force upload to the GPU
-                            pDepthImage->uMat();
-                        }
-                    }
-                    m_outputDepthMapImagePort.send(Measurement::ImageMeasurement(ts, pDepthImage));
+                } else {
+                    LOG4CPP_WARN(logger, "Stream type is not known.");
                 }
             }
-
-        } else {
-            LOG4CPP_WARN(logger, "Stream type is not known.");
         }
-
-
     }
 
     void RealsenseCameraComponent::stop()
