@@ -646,6 +646,8 @@ namespace Ubitrack { namespace Drivers {
         rs2_stream stream_type = f.get_profile().stream_type();
         int stream_index = f.get_profile().stream_index();
 
+        LOG4CPP_TRACE(logger, "Received Frame type: " << stream_type << " idx: " << stream_index);
+
         if (stream_type == rs2_stream::RS2_STREAM_COLOR) {
             if (auto vf = f.as<rs2::video_frame>()) {
                 auto imageFormatProperties = getImageFormatPropertiesFromRS2Frame(f);
