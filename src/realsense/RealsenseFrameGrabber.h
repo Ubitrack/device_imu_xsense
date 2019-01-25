@@ -264,6 +264,10 @@ using namespace Dataflow;
         RealsenseSensorOperationMode m_operation_mode;
         boost::filesystem::path m_rosbag_filename;
         boost::filesystem::path m_timestamp_filename;
+        boost::filesystem::path m_cameramodel_left_filename;
+        boost::filesystem::path m_cameramodel_color_filename;
+        boost::filesystem::path m_depth2color_filename;
+
         std::filebuf m_timestamp_filebuffer;
 
         bool m_autoGPUUpload;

@@ -152,7 +152,11 @@
             </Attribute>
 
             <Attribute name="rsRosBagFilename" displayName="Filename ROS Bag" default="rscapture.bag" xsi:type="PathAttributeDeclarationType"/>
-            <Attribute name="rsTimestampFilename" displayName="Filename Timestamp" default="rscapture_ts.txt" xsi:type="PathAttributeDeclarationType"/>
+            <Attribute name="rsTimestampFilename" displayName="Filename Timestamp" default="rscapture_timestamps.txt" xsi:type="PathAttributeDeclarationType"/>
+            <Attribute name="rsCameraModelLeftFilename" displayName="Filename CameraModel Left" default="rscapture_cameramodel_left.calib" xsi:type="PathAttributeDeclarationType"/>
+            <Attribute name="rsCameraModelColorFilename" displayName="Filename CameraModel Color" default="rscapture_cameramodel_color.calib" xsi:type="PathAttributeDeclarationType"/>
+            <Attribute name="rsDepth2ColorFilename" displayName="Filename Depth2Color Transform" default="rscapture_depth2color.calib" xsi:type="PathAttributeDeclarationType"/>
+
 
             <Attribute name="uploadImageOnGPU" displayName="Automatic Upload on GPU" default="false" xsi:type="EnumAttributeDeclarationType">
                 <Description>

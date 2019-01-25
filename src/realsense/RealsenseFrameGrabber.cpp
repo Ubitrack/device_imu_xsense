@@ -37,6 +37,7 @@
 #include <algorithm>
 #include <utDataflow/ComponentFactory.h>
 #include <utUtil/OS.h>
+#include <utUtil/CalibFile.h>
 #include <boost/array.hpp>
 
 #include <opencv2/opencv.hpp>
@@ -236,6 +237,11 @@ namespace Ubitrack { namespace Drivers {
         , m_haveIRLeftStream(false)
 //        , m_haveIRRightStream(false)
         , m_haveDepthStream(false)
+        , m_rosbag_filename("rscapture.bag")
+        , m_timestamp_filename("rscapture_timestamps.txt")
+        , m_cameramodel_left_filename("rscapture_cameramodel_left.calib")
+        , m_cameramodel_color_filename("rscapture_cameramodel_color.calib")
+        , m_depth2color_filename("rscapture_depth2color.calib")
         , m_operation_mode(OPERATION_MODE_LIVESTREAM)
         , m_autoGPUUpload(false)
     {
@@ -293,6 +299,15 @@ namespace Ubitrack { namespace Drivers {
         }
         if (subgraph->m_DataflowAttributes.hasAttribute("rsTimestampFilename")){
             m_timestamp_filename = subgraph->m_DataflowAttributes.getAttributeString("rsTimestampFilename");
+        }
+        if (subgraph->m_DataflowAttributes.hasAttribute("rsCameraModelLeftFilename")){
+            m_cameramodel_left_filename = subgraph->m_DataflowAttributes.getAttributeString("rsCameraModelLeftFilename");
+        }
+        if (subgraph->m_DataflowAttributes.hasAttribute("rsCameraModelColorFilename")){
+            m_cameramodel_color_filename = subgraph->m_DataflowAttributes.getAttributeString("rsCameraModelColorFilename");
+        }
+        if (subgraph->m_DataflowAttributes.hasAttribute("rsDepth2ColorFilename")){
+            m_depth2color_filename = subgraph->m_DataflowAttributes.getAttributeString("rsDepth2ColorFilename");
         }
 
 
@@ -457,26 +472,58 @@ namespace Ubitrack { namespace Drivers {
 
         if (m_haveColorStream) {
             std::string portname = "ColorImageOutput";
-            if (!get_intrinsics_for_stream(m_stream_profile_map, portname, m_colorCameraModel)) {
-                LOG4CPP_WARN(logger, "Intrinsics not found for " << portname);
+            if (m_operation_mode == OPERATION_MODE_PLAYBACK) {
+                // we're in playback mode, read calibfile
+                Ubitrack::Util::readCalibFile(m_cameramodel_color_filename.string(), m_colorCameraModel);
+            } else {
+                if (!get_intrinsics_for_stream(m_stream_profile_map, portname, m_colorCameraModel)) {
+                    LOG4CPP_WARN(logger, "Intrinsics not found for " << portname);
+                } else if (m_operation_mode == OPERATION_MODE_LIVESTREAM_RECORD) {
+                    // we got a calibration from the camera and are in record mode, so write it.
+                    Ubitrack::Util::writeCalibFile(m_cameramodel_color_filename.string(), m_colorCameraModel);
+                }
             }
         }
         if (m_haveDepthStream) {
             std::string portname = "DepthImageOutput";
-            if (!get_intrinsics_for_stream(m_stream_profile_map, portname, m_infraredLeftCameraModel)) {
-                LOG4CPP_WARN(logger, "Intrinsics not found for " << portname);
+            if (m_operation_mode == OPERATION_MODE_PLAYBACK) {
+                // we're in playback mode, read calibfile
+                Ubitrack::Util::readCalibFile(m_cameramodel_left_filename.string(), m_infraredLeftCameraModel);
+            } else {
+                if (!get_intrinsics_for_stream(m_stream_profile_map, portname, m_infraredLeftCameraModel)) {
+                    LOG4CPP_WARN(logger, "Intrinsics not found for " << portname);
+                } else if (m_operation_mode == OPERATION_MODE_LIVESTREAM_RECORD) {
+                    // we got a calibration from the camera and are in record mode, so write it.
+                    Ubitrack::Util::writeCalibFile(m_cameramodel_left_filename.string(), m_infraredLeftCameraModel);
+                }
             }
         } else if (m_haveIRLeftStream) {
             std::string portname = "IRLeftImageOutput";
-            if (!get_intrinsics_for_stream(m_stream_profile_map, portname, m_infraredLeftCameraModel)) {
-                LOG4CPP_WARN(logger, "Intrinsics not found for " << portname);
+            if (m_operation_mode == OPERATION_MODE_PLAYBACK) {
+                // we're in playback mode, read calibfile
+                Ubitrack::Util::readCalibFile(m_cameramodel_left_filename.string(), m_infraredLeftCameraModel);
+            } else {
+                if (!get_intrinsics_for_stream(m_stream_profile_map, portname, m_infraredLeftCameraModel)) {
+                    LOG4CPP_WARN(logger, "Intrinsics not found for " << portname);
+                } else if (m_operation_mode == OPERATION_MODE_LIVESTREAM_RECORD) {
+                    // we got a calibration from the camera and are in record mode, so write it.
+                    Ubitrack::Util::writeCalibFile(m_cameramodel_left_filename.string(), m_infraredLeftCameraModel);
+                }
             }
         }
 
 //        if (m_haveIRRightStream) {
 //            std::string portname = "IRRightImageOutput";
-//            if (!get_intrinsics_for_stream(m_stream_profile_map, portname, m_infraredRightCameraModel)) {
-//                LOG4CPP_WARN(logger, "Intrinsics not found for " << portname);
+//            if (m_operation_mode == OPERATION_MODE_PLAYBACK) {
+//                // we're in playback mode, read calibfile
+//                Ubitrack::Util::readCalibFile(m_cameramodel_right_filename.string(), m_infraredRightCameraModel);
+//            } else {
+//                if (!get_intrinsics_for_stream(m_stream_profile_map, portname, m_infraredRightCameraModel)) {
+//                    LOG4CPP_WARN(logger, "Intrinsics not found for " << portname);
+//                } else if (m_operation_mode == OPERATION_MODE_LIVESTREAM_RECORD) {
+//                    // we got a calibration from the camera and are in record mode, so write it.
+//                    Ubitrack::Util::writeCalibFile(m_cameramodel_right_filename.string(), m_infraredRightCameraModel);
+//                }
 //            }
 //        }
 
@@ -489,15 +536,38 @@ namespace Ubitrack { namespace Drivers {
 //        }
 //
         if (m_haveColorStream) {
+
+            std::string portname;
             if (m_haveDepthStream) {
-                get_pose_between_streams(m_stream_profile_map, "DepthImageOutput", "ColorImageOutput", m_leftToColorTransform);
+                portname = "DepthImageOutput";
             } else if (m_haveIRLeftStream) {
-                get_pose_between_streams(m_stream_profile_map, "IRLeftImageOutput", "ColorImageOutput", m_leftToColorTransform);
+                portname = "IRLeftImageOutput";
+            }
+
+            if (m_operation_mode == OPERATION_MODE_PLAYBACK) {
+                // we're in playback mode, read calibfile
+                Ubitrack::Util::readCalibFile(m_depth2color_filename.string(), m_leftToColorTransform);
             } else {
-                LOG4CPP_WARN(logger, "IR Left2Color Transform cannot be determined ");
+                if (!get_pose_between_streams(m_stream_profile_map, portname, "ColorImageOutput", m_leftToColorTransform)) {
+                    LOG4CPP_WARN(logger, "IR Left2Color Transform cannot be determined: " << portname);
+                } else if (m_operation_mode == OPERATION_MODE_LIVESTREAM_RECORD) {
+                    // we got a calibration from the camera and are in record mode, so write it.
+                    Ubitrack::Util::writeCalibFile(m_depth2color_filename.string(), m_leftToColorTransform);
+                }
             }
         }
 
+        if (m_haveDepthStream) {
+            if (auto dpt_sensor = m_pipeline_profile.get_device().first<rs2::depth_sensor>()) {
+                // retrieve depth scaling from sensor like this:
+                //A Depth stream contains an image that is composed of pixels with depth information.
+                //The value of each pixel is the distance from the camera, in some distance units.
+                //To get the distance in units of meters, each pixel's value should be multiplied by the sensor's depth scale
+                //Here is the way to grab this scale value for a "depth" sensor:
+                float scale = dpt_sensor.get_depth_scale();
+                LOG4CPP_INFO(logger, "Scale factor for the realsense depth sensor is: " << scale);
+            }
+        }
     }
 
     void RealsenseCameraComponent::setOptions() {
@@ -546,15 +616,6 @@ namespace Ubitrack { namespace Drivers {
                 dpt_sensor.set_option(rs2_option::RS2_OPTION_EMITTER_ENABLED, m_depthEmitterEnabled);
                 dpt_sensor.set_option(rs2_option::RS2_OPTION_GAIN, m_infraredGain);
 
-
-                // retrieve depth scaling from sensor like this:
-                //A Depth stream contains an image that is composed of pixels with depth information.
-                //The value of each pixel is the distance from the camera, in some distance units.
-                //To get the distance in units of meters, each pixel's value should be multiplied by the sensor's depth scale
-                //Here is the way to grab this scale value for a "depth" sensor:
-                float scale = dpt_sensor.get_depth_scale();
-                LOG4CPP_INFO(logger, "Scale factor for the realsense depth sensor is: " << scale);
-
             } else {
                 // color sensor options ?
             }
@@ -565,7 +626,17 @@ namespace Ubitrack { namespace Drivers {
 
         setupDevice();
         retrieveCalibration();
-        setOptions();
+        if (m_operation_mode != OPERATION_MODE_PLAYBACK) {
+            setOptions();
+        }
+
+        if (m_operation_mode == OPERATION_MODE_LIVESTREAM_RECORD) {
+            LOG4CPP_DEBUG(logger, "Open Timestamp Filename:" << m_timestamp_filename.string());
+            m_timestamp_filebuffer.open ( m_timestamp_filename.string().c_str(), std::ios::out );
+            if( !m_timestamp_filebuffer.is_open()  ) {
+                UBITRACK_THROW("Error opening timestamp file" );
+            }
+        }
 
         // Start streaming
         m_pipeline->start(m_pipeline_config, [this](rs2::frame f)
@@ -579,6 +650,10 @@ namespace Ubitrack { namespace Drivers {
 
         // convert from frame timestamp (milliseconds, double) to Measurement::Timestamp (nanoseconds, unsigned long long)
         auto ts = (Measurement::Timestamp)(frame.get_timestamp() * 1000000);
+
+        // write the corresponding timestamp to a file
+        std::ostream os( &m_timestamp_filebuffer );
+        os << ts << " " << frame.get_frame_number() << std::endl;
 
         if (rs2::frameset fs = frame.as<rs2::frameset>())
         {
