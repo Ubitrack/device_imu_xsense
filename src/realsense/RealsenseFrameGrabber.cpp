@@ -50,8 +50,83 @@ using namespace Ubitrack;
 using namespace Ubitrack::Vision;
 using namespace Ubitrack::Drivers;
 
-bool profile_contains_stream(std::map<std::string, rs2::stream_profile>& map, std::string key) {
+bool profile_contains_stream(const std::map<std::string, rs2::stream_profile>& map, const std::string& key) {
     return (map.find(key) != map.end());
+}
+
+bool get_intrinsics_for_stream(std::map<std::string, rs2::stream_profile>& map, const std::string& key, Math::CameraIntrinsics<double>& value) {
+    if (profile_contains_stream(map, key)) {
+        auto& stream_profile = map[key];
+        if (auto vp = stream_profile.as<rs2::video_stream_profile>()) {
+            try {
+                rs2_intrinsics intr = vp.get_intrinsics();
+
+                Math::Matrix< double, 3, 3 > intrinsicMatrix = Math::Matrix3x3d::identity();
+                intrinsicMatrix(0, 0) = intr.fx;
+                intrinsicMatrix(1, 1) = intr.fy;
+                intrinsicMatrix(0, 2) = -intr.ppx;
+                intrinsicMatrix(1, 2) = -intr.ppy;
+                intrinsicMatrix(2, 2) = -1.0;
+
+                // [ k1, k2, p1, p2, k3 ]
+                Math::Vector< double, 3 > radial(intr.coeffs[0],
+                                                 intr.coeffs[1],
+                                                 intr.coeffs[4]);
+                Math::Vector< double, 2 > tangential(intr.coeffs[2],
+                                                     intr.coeffs[3]);
+                auto width = (std::size_t)intr.width;
+                auto height = (std::size_t)intr.height;
+
+                value = Math::CameraIntrinsics<double>(intrinsicMatrix, radial, tangential, width, height);
+                LOG4CPP_DEBUG(logger, key << " Camera Model: " << value);
+                return true;
+            } catch( rs2::error& e) {
+                LOG4CPP_ERROR(logger, e.what());
+            }
+        }
+    }
+    value = Math::CameraIntrinsics<double>();
+    return false;
+}
+
+bool get_pose_between_streams(std::map<std::string, rs2::stream_profile>& map, const std::string& source,
+                              const std::string& destination, Math::Pose& value) {
+    if ((profile_contains_stream(map, source)) && (profile_contains_stream(map, destination))) {
+        auto& left_stream_profile = map[source];
+        auto& color_stream_profile = map[destination];
+        try {
+            auto left2color = left_stream_profile.get_extrinsics_to(color_stream_profile);
+            auto rot_mat = Math::Matrix3x3d::identity();
+
+            // librealsense and ubitrack store matrices column-major
+            rot_mat( 0, 0 ) = left2color.rotation[0];
+            rot_mat( 1, 0 ) = left2color.rotation[3];
+            rot_mat( 2, 0 ) = left2color.rotation[6];
+
+            rot_mat( 0, 1 ) = left2color.rotation[1];
+            rot_mat( 1, 1 ) = left2color.rotation[4];
+            rot_mat( 2, 1 ) = left2color.rotation[7];
+
+            rot_mat( 0, 2 ) = left2color.rotation[2];
+            rot_mat( 1, 2 ) = left2color.rotation[5];
+            rot_mat( 2, 2 ) = left2color.rotation[8];
+
+            Math::Quaternion ut_quat(rot_mat);
+
+            Math::Vector3d ut_trans(
+                    (double)left2color.translation[0],
+                    (double)left2color.translation[1],
+                    (double)left2color.translation[2]
+            );
+            value = Math::Pose(ut_quat, ut_trans);
+            LOG4CPP_DEBUG(logger, "IR Left2Color Transform: " << value);
+            return true;
+        } catch (rs2::error& e) {
+            LOG4CPP_ERROR(logger, e.what());
+        }
+    }
+    value = Math::Pose();
+    return false;
 }
 
 Ubitrack::Vision::Image::ImageFormatProperties getImageFormatPropertiesFromRS2Frame(const rs2::frame& f) {
@@ -379,193 +454,49 @@ namespace Ubitrack { namespace Drivers {
     }
 
     void RealsenseCameraComponent::retrieveCalibration() {
-        // @todo get_intrinsics could throw exception .. should be handled.
-        if ((m_haveColorStream) && (profile_contains_stream(m_stream_profile_map, "ColorImageOutput"))) {
-            auto& stream_profile = m_stream_profile_map["ColorImageOutput"];
-            if (auto vp = stream_profile.as<rs2::video_stream_profile>()) {
-                rs2_intrinsics intr = vp.get_intrinsics();
 
-                Math::Matrix< double, 3, 3 > intrinsicMatrix = Math::Matrix3x3d::identity();
-                intrinsicMatrix(0, 0) = intr.fx;
-                intrinsicMatrix(1, 1) = intr.fy;
-                intrinsicMatrix(0, 2) = -intr.ppx;
-                intrinsicMatrix(1, 2) = -intr.ppy;
-                intrinsicMatrix(2, 2) = -1.0;
-
-                // [ k1, k2, p1, p2, k3 ]
-                Math::Vector< double, 3 > radial(intr.coeffs[0],
-                                                 intr.coeffs[1],
-                                                 intr.coeffs[4]);
-                Math::Vector< double, 2 > tangential(intr.coeffs[2],
-                                                     intr.coeffs[3]);
-                auto width = (std::size_t)intr.width;
-                auto height = (std::size_t)intr.height;
-
-                m_colorCameraModel = Math::CameraIntrinsics<double>(intrinsicMatrix, radial, tangential, width, height);
-                LOG4CPP_DEBUG(logger, "Color Camera Model: " << m_colorCameraModel);
+        if (m_haveColorStream) {
+            std::string portname = "ColorImageOutput";
+            if (!get_intrinsics_for_stream(m_stream_profile_map, portname, m_colorCameraModel)) {
+                LOG4CPP_WARN(logger, "Intrinsics not found for " << portname);
             }
-        } else {
-            m_colorCameraModel = Math::CameraIntrinsics<double>();
+        }
+        if (m_haveDepthStream) {
+            std::string portname = "DepthImageOutput";
+            if (!get_intrinsics_for_stream(m_stream_profile_map, portname, m_infraredLeftCameraModel)) {
+                LOG4CPP_WARN(logger, "Intrinsics not found for " << portname);
+            }
+        } else if (m_haveIRLeftStream) {
+            std::string portname = "IRLeftImageOutput";
+            if (!get_intrinsics_for_stream(m_stream_profile_map, portname, m_infraredLeftCameraModel)) {
+                LOG4CPP_WARN(logger, "Intrinsics not found for " << portname);
+            }
         }
 
-        if ((m_haveDepthStream) && (profile_contains_stream(m_stream_profile_map, "DepthImageOutput"))) {
-            auto& stream_profile = m_stream_profile_map["DepthImageOutput"];
-            if (auto vp = stream_profile.as<rs2::video_stream_profile>()) {
-                rs2_intrinsics intr = vp.get_intrinsics();
-
-                Math::Matrix< double, 3, 3 > intrinsicMatrix = Math::Matrix3x3d::identity();
-                intrinsicMatrix(0, 0) = intr.fx;
-                intrinsicMatrix(1, 1) = intr.fy;
-                intrinsicMatrix(0, 2) = -intr.ppx;
-                intrinsicMatrix(1, 2) = -intr.ppy;
-                intrinsicMatrix(2, 2) = -1.0;
-
-                // [ k1, k2, p1, p2, k3 ]
-                Math::Vector< double, 3 > radial(intr.coeffs[0],
-                                                 intr.coeffs[1],
-                                                 intr.coeffs[4]);
-                Math::Vector< double, 2 > tangential(intr.coeffs[2],
-                                                     intr.coeffs[3]);
-                auto width = (std::size_t)intr.width;
-                auto height = (std::size_t)intr.height;
-
-                m_infraredLeftCameraModel = Math::CameraIntrinsics<double>(intrinsicMatrix, radial, tangential, width, height);
-                LOG4CPP_DEBUG(logger, "IR Left Camera Model: " << m_infraredLeftCameraModel);
-            }
-        } else if ((m_haveIRLeftStream) && (profile_contains_stream(m_stream_profile_map, "IRLeftImageOutput"))) {
-            auto& stream_profile = m_stream_profile_map["IRLeftImageOutput"];
-            if (auto vp = stream_profile.as<rs2::video_stream_profile>()) {
-                rs2_intrinsics intr = vp.get_intrinsics();
-
-                Math::Matrix< double, 3, 3 > intrinsicMatrix = Math::Matrix3x3d::identity();
-                intrinsicMatrix(0, 0) = intr.fx;
-                intrinsicMatrix(1, 1) = intr.fy;
-                intrinsicMatrix(0, 2) = -intr.ppx;
-                intrinsicMatrix(1, 2) = -intr.ppy;
-                intrinsicMatrix(2, 2) = -1.0;
-
-                // [ k1, k2, p1, p2, k3 ]
-                Math::Vector< double, 3 > radial(intr.coeffs[0],
-                                                 intr.coeffs[1],
-                                                 intr.coeffs[4]);
-                Math::Vector< double, 2 > tangential(intr.coeffs[2],
-                                                     intr.coeffs[3]);
-                auto width = (std::size_t)intr.width;
-                auto height = (std::size_t)intr.height;
-
-                m_infraredLeftCameraModel = Math::CameraIntrinsics<double>(intrinsicMatrix, radial, tangential, width, height);
-                LOG4CPP_DEBUG(logger, "IR Left Camera Model: " << m_infraredLeftCameraModel);
-            }
-        } else {
-            m_infraredLeftCameraModel = Math::CameraIntrinsics<double>();
-        }
-
-//        if ((m_haveIRRightStream) && (profile_contains_stream(m_stream_profile_map, "IRRightImageOutput"))) {
-//            auto& stream_profile = m_stream_profile_map["IRRightImageOutput"];
-//            if (auto vp = stream_profile.as<rs2::video_stream_profile>()) {
-//                rs2_intrinsics intr = vp.get_intrinsics();
-//
-//                Math::Matrix< double, 3, 3 > intrinsicMatrix = Math::Matrix3x3d::identity();
-//                intrinsicMatrix(0, 0) = intr.fx;
-//                intrinsicMatrix(1, 1) = intr.fy;
-//                intrinsicMatrix(0, 2) = -intr.ppx;
-//                intrinsicMatrix(1, 2) = -intr.ppy;
-//                intrinsicMatrix(2, 2) = -1.0;
-//
-//                // [ k1, k2, p1, p2, k3 ]
-//                Math::Vector< double, 3 > radial(intr.coeffs[0],
-//                                                 intr.coeffs[1],
-//                                                 intr.coeffs[4]);
-//                Math::Vector< double, 2 > tangential(intr.coeffs[2],
-//                                                     intr.coeffs[3]);
-//                auto width = (std::size_t)intr.width;
-//                auto height = (std::size_t)intr.height;
-//
-//                m_infraredRightCameraModel = Math::CameraIntrinsics<double>(intrinsicMatrix, radial, tangential, width, height);
-//                LOG4CPP_DEBUG(logger, "IR Right Camera Model: " << m_infraredRightCameraModel);
+//        if (m_haveIRRightStream) {
+//            std::string portname = "IRRightImageOutput";
+//            if (!get_intrinsics_for_stream(m_stream_profile_map, portname, m_infraredRightCameraModel)) {
+//                LOG4CPP_WARN(logger, "Intrinsics not found for " << portname);
 //            }
-//        } else {
-//            m_infraredRightCameraModel = Math::CameraIntrinsics<double>();
 //        }
 
-
-//        if (m_haveIRLeftStream && m_haveIRRightStream) {
-//            auto& left_stream_profile = m_stream_profile_map["IRLeftImageOutput"];
-//            auto& right_stream_profile = m_stream_profile_map["IRRightImageOutput"];
-//            auto left2right = left_stream_profile.get_extrinsics_to(right_stream_profile);
-//            auto rot_mat = Math::Matrix3x3d::identity();
-//
-//            // librealsense and ubitrack store matrices column-major
-//            rot_mat( 0, 0 ) = left2right.rotation[0];
-//            rot_mat( 1, 0 ) = left2right.rotation[3];
-//            rot_mat( 2, 0 ) = left2right.rotation[6];
-//
-//            rot_mat( 0, 1 ) = left2right.rotation[1];
-//            rot_mat( 1, 1 ) = left2right.rotation[4];
-//            rot_mat( 2, 1 ) = left2right.rotation[7];
-//
-//            rot_mat( 0, 2 ) = left2right.rotation[2];
-//            rot_mat( 1, 2 ) = left2right.rotation[5];
-//            rot_mat( 2, 2 ) = left2right.rotation[8];
-//
-//            Math::Quaternion ut_quat(rot_mat);
-//
-//            Math::Vector3d ut_trans(
-//                    (double)left2right.translation[0],
-//                    (double)left2right.translation[1],
-//                    (double)left2right.translation[2]
-//                    );
-//            m_leftToRightTransform = Math::Pose(ut_quat, ut_trans);
-//            LOG4CPP_DEBUG(logger, "IR Left2Right Transform: " << m_leftToRightTransform);
-//        } else {
-//            m_leftToRightTransform = Math::Pose();
+//        if (m_haveIRRightStream) {
+//            if (m_haveIRLeftStream) {
+//                get_pose_between_streams(m_stream_profile_map, "IRLeftImageOutput", "IRRightImageOutput", m_leftToRightTransform);
+//            } else if (m_haveDepthStream) {
+//                get_pose_between_streams(m_stream_profile_map, "DepthImageOutput", "IRRightImageOutput", m_leftToRightTransform);
+//            }
 //        }
-
-        // only one of the two streams leftIR or depth might be available
-        // the available models had identical calibration values, so we take either
-        if ((m_haveIRLeftStream || m_haveDepthStream) && m_haveColorStream) {
-            auto& left_stream_profile = m_haveDepthStream ? m_stream_profile_map["DepthImageOutput"] : m_stream_profile_map["IRLeftImageOutput"];
-            auto& color_stream_profile = m_stream_profile_map["ColorImageOutput"];
-            auto left2color = left_stream_profile.get_extrinsics_to(color_stream_profile);
-            auto rot_mat = Math::Matrix3x3d::identity();
-
-            // librealsense and ubitrack store matrices column-major
-            rot_mat( 0, 0 ) = left2color.rotation[0];
-            rot_mat( 1, 0 ) = left2color.rotation[3];
-            rot_mat( 2, 0 ) = left2color.rotation[6];
-
-            rot_mat( 0, 1 ) = left2color.rotation[1];
-            rot_mat( 1, 1 ) = left2color.rotation[4];
-            rot_mat( 2, 1 ) = left2color.rotation[7];
-
-            rot_mat( 0, 2 ) = left2color.rotation[2];
-            rot_mat( 1, 2 ) = left2color.rotation[5];
-            rot_mat( 2, 2 ) = left2color.rotation[8];
-
-            Math::Quaternion ut_quat(rot_mat);
-
-            Math::Vector3d ut_trans(
-                    (double)left2color.translation[0],
-                    (double)left2color.translation[1],
-                    (double)left2color.translation[2]
-            );
-            m_leftToColorTransform = Math::Pose(ut_quat, ut_trans);
-            LOG4CPP_DEBUG(logger, "IR Left2Color Transform: " << m_leftToColorTransform);
-        } else {
-            m_leftToColorTransform = Math::Pose();
+//
+        if (m_haveColorStream) {
+            if (m_haveDepthStream) {
+                get_pose_between_streams(m_stream_profile_map, "DepthImageOutput", "ColorImageOutput", m_leftToColorTransform);
+            } else if (m_haveIRLeftStream) {
+                get_pose_between_streams(m_stream_profile_map, "IRLeftImageOutput", "ColorImageOutput", m_leftToColorTransform);
+            } else {
+                LOG4CPP_WARN(logger, "IR Left2Color Transform cannot be determined ");
+            }
         }
-
-        // retrieve depth scaling from sensor like this:
-        //A Depth stream contains an image that is composed of pixels with depth information.
-        //The value of each pixel is the distance from the camera, in some distance units.
-        //To get the distance in units of meters, each pixel's value should be multiplied by the sensor's depth scale
-        //Here is the way to grab this scale value for a "depth" sensor:
-//        if (rs2::depth_sensor dpt_sensor = sensor.as<rs2::depth_sensor>())
-//        {
-//            float scale = dpt_sensor.get_depth_scale();
-//            std::cout << "Scale factor for depth sensor is: " << scale << std::endl;
-//            return scale;
-//        }
 
     }
 
@@ -614,6 +545,16 @@ namespace Ubitrack { namespace Drivers {
                 dpt_sensor.set_option(rs2_option::RS2_OPTION_LASER_POWER, m_depthLaserPower);
                 dpt_sensor.set_option(rs2_option::RS2_OPTION_EMITTER_ENABLED, m_depthEmitterEnabled);
                 dpt_sensor.set_option(rs2_option::RS2_OPTION_GAIN, m_infraredGain);
+
+
+                // retrieve depth scaling from sensor like this:
+                //A Depth stream contains an image that is composed of pixels with depth information.
+                //The value of each pixel is the distance from the camera, in some distance units.
+                //To get the distance in units of meters, each pixel's value should be multiplied by the sensor's depth scale
+                //Here is the way to grab this scale value for a "depth" sensor:
+                float scale = dpt_sensor.get_depth_scale();
+                LOG4CPP_INFO(logger, "Scale factor for the realsense depth sensor is: " << scale);
+
             } else {
                 // color sensor options ?
             }
@@ -627,7 +568,7 @@ namespace Ubitrack { namespace Drivers {
         setOptions();
 
         // Start streaming
-        m_pipeline->start(m_pipeline_config, [this](const rs2::frame& f)
+        m_pipeline->start(m_pipeline_config, [this](rs2::frame f)
         {
             handleFrame(f);
         });
@@ -642,7 +583,7 @@ namespace Ubitrack { namespace Drivers {
         if (rs2::frameset fs = frame.as<rs2::frameset>())
         {
             // With callbacks, all synchronized stream will arrive in a single frameset
-            for (const rs2::frame& f : fs) {
+            for (auto&& f : fs) {
                 rs2_stream stream_type = f.get_profile().stream_type();
                 int stream_index = f.get_profile().stream_index();
 

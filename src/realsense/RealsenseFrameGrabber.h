@@ -67,20 +67,25 @@
 #include <librealsense2/rs.hpp>
 
 
+namespace Ubitrack { namespace Drivers {
+
+        enum RealsenseSensorOperationMode {
+            OPERATION_MODE_LIVESTREAM = 0,
+            OPERATION_MODE_LIVESTREAM_RECORD,
+            OPERATION_MODE_PLAYBACK
+        };
+
+    }
+}
+
 namespace {
 
-    enum RealsenseSensorOperationMode {
-        OPERATION_MODE_LIVESTREAM = 0,
-        OPERATION_MODE_LIVESTREAM_RECORD,
-        OPERATION_MODE_PLAYBACK
-    };
-
-    class RealsenseOperationModeMap : public std::map< std::string, RealsenseSensorOperationMode > {
+class RealsenseOperationModeMap : public std::map< std::string, Ubitrack::Drivers::RealsenseSensorOperationMode > {
     public:
         RealsenseOperationModeMap() {
-            (*this)["LIVESTREAM"] = OPERATION_MODE_LIVESTREAM;
-            (*this)["LIVESTREAM_RECORD"] = OPERATION_MODE_LIVESTREAM_RECORD;
-            (*this)["PLAYBACK"] = OPERATION_MODE_PLAYBACK;
+            (*this)["LIVESTREAM"] = Ubitrack::Drivers::OPERATION_MODE_LIVESTREAM;
+            (*this)["LIVESTREAM_RECORD"] = Ubitrack::Drivers::OPERATION_MODE_LIVESTREAM_RECORD;
+            (*this)["PLAYBACK"] = Ubitrack::Drivers::OPERATION_MODE_PLAYBACK;
         }
     };
     static RealsenseOperationModeMap realsenseOperationModeMap;
