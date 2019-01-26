@@ -407,7 +407,7 @@ namespace Ubitrack { namespace Drivers {
             }
 
             // only configure streams when accessing the sensor
-            for (auto i = 0; i < m_stream_requests.size() - 1; i++) {
+            for (auto i = 0; i < m_stream_requests.size(); i++) {
                 LOG4CPP_DEBUG(logger, "Enable Stream: " << m_stream_requests[i]._port_name << " Type: " << m_stream_requests[i]._stream_type
                 << " Idx: " << m_stream_requests[i]._stream_idx << " Format: " << m_stream_requests[i]._stream_format << " ("
                 << m_stream_requests[i]._width << "x" << m_stream_requests[i]._height << ")");
