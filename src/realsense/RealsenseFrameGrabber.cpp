@@ -395,6 +395,7 @@ namespace Ubitrack { namespace Drivers {
 
             case OPERATION_MODE_PLAYBACK:
                 m_pipeline_config.enable_device_from_file(m_rosbag_filename.string());
+                m_pipeline_config.enable_all_streams();
                 break;
         }
 
@@ -407,10 +408,17 @@ namespace Ubitrack { namespace Drivers {
 
             // only configure streams when accessing the sensor
             for (auto i = 0; i < m_stream_requests.size() - 1; i++) {
+                LOG4CPP_DEBUG(logger, "Enable Stream: " << m_stream_requests[i]._port_name << " Type: " << m_stream_requests[i]._stream_type
+                << " Idx: " << m_stream_requests[i]._stream_idx << " Format: " << m_stream_requests[i]._stream_format << " ("
+                << m_stream_requests[i]._width << "x" << m_stream_requests[i]._height << ")");
+
                 m_pipeline_config.enable_stream(
-                        m_stream_requests[i]._stream_type, m_stream_requests[i]._stream_idx,
-                        m_stream_requests[i]._width, m_stream_requests[i]._height,
-                        m_stream_requests[i]._stream_format, m_stream_requests[i]._fps
+                        m_stream_requests[i]._stream_type,
+                        m_stream_requests[i]._stream_idx,
+                        m_stream_requests[i]._width,
+                        m_stream_requests[i]._height,
+                        m_stream_requests[i]._stream_format,
+                        m_stream_requests[i]._fps
                 );
             }
         }
