@@ -49,6 +49,7 @@
 #include <boost/function.hpp>
 #include <boost/bind.hpp>
 #include <boost/scoped_ptr.hpp>
+#include <boost/filesystem.hpp>
 
 #include <utDataflow/PushSupplier.h>
 #include <utDataflow/PullSupplier.h>
@@ -66,7 +67,29 @@
 #include <librealsense2/rs.hpp>
 
 
+namespace Ubitrack { namespace Drivers {
+
+        enum RealsenseSensorOperationMode {
+            OPERATION_MODE_LIVESTREAM = 0,
+            OPERATION_MODE_LIVESTREAM_RECORD,
+            OPERATION_MODE_PLAYBACK
+        };
+
+    }
+}
+
 namespace {
+
+class RealsenseOperationModeMap : public std::map< std::string, Ubitrack::Drivers::RealsenseSensorOperationMode > {
+    public:
+        RealsenseOperationModeMap() {
+            (*this)["LIVESTREAM"] = Ubitrack::Drivers::OPERATION_MODE_LIVESTREAM;
+            (*this)["LIVESTREAM_RECORD"] = Ubitrack::Drivers::OPERATION_MODE_LIVESTREAM_RECORD;
+            (*this)["PLAYBACK"] = Ubitrack::Drivers::OPERATION_MODE_PLAYBACK;
+        }
+    };
+    static RealsenseOperationModeMap realsenseOperationModeMap;
+
 
     class RealsenseStreamFormatMap : public std::map< std::string, rs2_format > {
     public:
@@ -188,12 +211,12 @@ using namespace Dataflow;
 
         bool m_haveColorStream;
         bool m_haveIRLeftStream;
-        bool m_haveIRRightStream;
+//        bool m_haveIRRightStream;
         bool m_haveDepthStream;
 
         Dataflow::PushSupplier <Measurement::ImageMeasurement> m_outputColorImagePort;
         Dataflow::PushSupplier <Measurement::ImageMeasurement> m_outputIRLeftImagePort;
-        Dataflow::PushSupplier <Measurement::ImageMeasurement> m_outputIRRightImagePort;
+//        Dataflow::PushSupplier <Measurement::ImageMeasurement> m_outputIRRightImagePort;
         Dataflow::PushSupplier <Measurement::ImageMeasurement> m_outputDepthMapImagePort;
         Dataflow::PushSupplier <Measurement::PositionList>     m_outputPointCloudPort;
 
@@ -201,10 +224,10 @@ using namespace Dataflow;
         Dataflow::PullSupplier <Measurement::Matrix3x3>        m_outputColorIntrinsicsMatrixPort;
         Dataflow::PullSupplier <Measurement::CameraIntrinsics> m_outputIRLeftCameraModelPort;
         Dataflow::PullSupplier <Measurement::Matrix3x3>        m_outputIRLeftIntrinsicsMatrixPort;
-        Dataflow::PullSupplier <Measurement::CameraIntrinsics> m_outputIRRightCameraModelPort;
-        Dataflow::PullSupplier <Measurement::Matrix3x3>        m_outputIRRightIntrinsicsMatrixPort;
+//        Dataflow::PullSupplier <Measurement::CameraIntrinsics> m_outputIRRightCameraModelPort;
+//        Dataflow::PullSupplier <Measurement::Matrix3x3>        m_outputIRRightIntrinsicsMatrixPort;
 
-        Dataflow::PullSupplier <Measurement::Pose> m_leftIRToRightIRTransformPort;
+//        Dataflow::PullSupplier <Measurement::Pose> m_leftIRToRightIRTransformPort;
         Dataflow::PullSupplier <Measurement::Pose> m_leftIRToColorTransformPort;
 
         // sensor configuration
@@ -229,13 +252,23 @@ using namespace Dataflow;
         rs2::context m_ctx;
 
         /** the associated realsense device **/
-        std::shared_ptr<rs2::device> m_dev;
-
+        rs2::config m_pipeline_config;
+        std::shared_ptr<rs2::pipeline> m_pipeline;
+        rs2::pipeline_profile m_pipeline_profile;
         std::vector<stream_request> m_stream_requests;
-        std::vector<rs2::stream_profile> m_selected_stream_profiles;
         std::map<std::string, rs2::stream_profile> m_stream_profile_map;
+        std::vector<rs2::stream_profile> m_selected_stream_profiles;
 
-        std::vector<rs2::sensor> m_active_sensors;
+
+        // sensor operation mode
+        RealsenseSensorOperationMode m_operation_mode;
+        boost::filesystem::path m_rosbag_filename;
+        boost::filesystem::path m_timestamp_filename;
+        boost::filesystem::path m_cameramodel_left_filename;
+        boost::filesystem::path m_cameramodel_color_filename;
+        boost::filesystem::path m_depth2color_filename;
+
+        std::filebuf m_timestamp_filebuffer;
 
         bool m_autoGPUUpload;
     };
