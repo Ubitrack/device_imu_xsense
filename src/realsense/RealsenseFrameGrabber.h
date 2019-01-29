@@ -51,6 +51,8 @@
 #include <boost/scoped_ptr.hpp>
 #include <boost/filesystem.hpp>
 
+#include <utUtil/Filesystem.h>
+
 #include <utDataflow/PushSupplier.h>
 #include <utDataflow/PullSupplier.h>
 #include <utDataflow/PushConsumer.h>

@@ -295,19 +295,24 @@ namespace Ubitrack { namespace Drivers {
 
 
         if (subgraph->m_DataflowAttributes.hasAttribute("rsRosBagFilename")){
-            m_rosbag_filename = subgraph->m_DataflowAttributes.getAttributeString("rsRosBagFilename");
+            boost::filesystem::path m_rosbag_filename_expanded = Ubitrack::Util::getFilesystemPath(subgraph->m_DataflowAttributes.getAttributeString("rsRosBagFilename"));
+            m_rosbag_filename = m_rosbag_filename_expanded.string();
         }
         if (subgraph->m_DataflowAttributes.hasAttribute("rsTimestampFilename")){
-            m_timestamp_filename = subgraph->m_DataflowAttributes.getAttributeString("rsTimestampFilename");
+            boost::filesystem::path m_timestamp_filename_expanded = Ubitrack::Util::getFilesystemPath(subgraph->m_DataflowAttributes.getAttributeString("rsTimestampFilename"));
+            m_timestamp_filename = m_timestamp_filename_expanded.string();
         }
         if (subgraph->m_DataflowAttributes.hasAttribute("rsCameraModelLeftFilename")){
-            m_cameramodel_left_filename = subgraph->m_DataflowAttributes.getAttributeString("rsCameraModelLeftFilename");
+            boost::filesystem::path m_cameramodel_left_filename_expanded = Ubitrack::Util::getFilesystemPath(subgraph->m_DataflowAttributes.getAttributeString("rsCameraModelLeftFilename"));
+            m_cameramodel_left_filename = m_cameramodel_left_filename_expanded.string();
         }
         if (subgraph->m_DataflowAttributes.hasAttribute("rsCameraModelColorFilename")){
-            m_cameramodel_color_filename = subgraph->m_DataflowAttributes.getAttributeString("rsCameraModelColorFilename");
+            boost::filesystem::path m_cameramodel_color_filename_expanded = Ubitrack::Util::getFilesystemPath(subgraph->m_DataflowAttributes.getAttributeString("rsCameraModelColorFilename"));
+            m_cameramodel_color_filename = m_cameramodel_color_filename_expanded.string();
         }
         if (subgraph->m_DataflowAttributes.hasAttribute("rsDepth2ColorFilename")){
-            m_depth2color_filename = subgraph->m_DataflowAttributes.getAttributeString("rsDepth2ColorFilename");
+            boost::filesystem::path m_depth2color_filename_expanded = Ubitrack::Util::getFilesystemPath(subgraph->m_DataflowAttributes.getAttributeString("rsDepth2ColorFilename"));
+            m_depth2color_filename = m_depth2color_filename_expanded.string();
         }
 
 
