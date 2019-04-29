@@ -82,7 +82,7 @@ namespace Ubitrack { namespace Drivers {
 
 namespace {
 
-class RealsenseOperationModeMap : public std::map< std::string, Ubitrack::Drivers::RealsenseSensorOperationMode > {
+    class RealsenseOperationModeMap : public std::map< std::string, Ubitrack::Drivers::RealsenseSensorOperationMode > {
     public:
         RealsenseOperationModeMap() {
             (*this)["LIVESTREAM"] = Ubitrack::Drivers::OPERATION_MODE_LIVESTREAM;
@@ -91,6 +91,17 @@ class RealsenseOperationModeMap : public std::map< std::string, Ubitrack::Driver
         }
     };
     static RealsenseOperationModeMap realsenseOperationModeMap;
+
+
+    class RealsenseHWSyndModeMap : public std::map< std::string, unsigned int > {
+    public:
+        RealsenseHWSyndModeMap() {
+            (*this)["DEFAULT"] = 0;
+            (*this)["MASTER"] = 1;
+            (*this)["SLAVE"] = 2;
+        }
+    };
+    static RealsenseHWSyndModeMap realsenseHWSyndModeMap;
 
 
     class RealsenseStreamFormatMap : public std::map< std::string, rs2_format > {
@@ -233,6 +244,7 @@ using namespace Dataflow;
         Dataflow::PullSupplier <Measurement::Pose> m_leftIRToColorTransformPort;
 
         // sensor configuration
+        unsigned int m_hwsync_mode;
         unsigned int m_colorImageWidth;
         unsigned int m_colorImageHeight;
         unsigned int m_depthImageWidth;

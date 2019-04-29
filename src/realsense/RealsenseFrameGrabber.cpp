@@ -315,6 +315,13 @@ namespace Ubitrack { namespace Drivers {
             m_depth2color_filename = m_depth2color_filename_expanded.string();
         }
 
+        if ( subgraph->m_DataflowAttributes.hasAttribute( "rsHardwareSync" ) )
+        {
+            std::string sHardwareSync = subgraph->m_DataflowAttributes.getAttributeString( "rsHardwareSync" );
+            if ( realsenseHWSyndModeMap.find( sHardwareSync ) == realsenseHWSyndModeMap.end() )
+                UBITRACK_THROW( "unknown hardware sync mode: \"" + sHardwareSync + "\"" );
+            m_hwsync_mode = realsenseHWSyndModeMap[ sHardwareSync ];
+        }
 
         subgraph->m_DataflowAttributes.getAttributeData( "rsFrameRate", m_frameRate );
 
@@ -629,10 +636,13 @@ namespace Ubitrack { namespace Drivers {
                 dpt_sensor.set_option(rs2_option::RS2_OPTION_EMITTER_ENABLED, m_depthEmitterEnabled);
                 dpt_sensor.set_option(rs2_option::RS2_OPTION_GAIN, m_infraredGain);
 
+                // set hw sync mode
+                dpt_sensor.set_option(rs2_option::RS2_OPTION_INTER_CAM_SYNC_MODE, m_hwsync_mode);
             } else {
                 // color sensor options ?
             }
         }
+
     }
 
     void RealsenseCameraComponent::startCapturing() {
