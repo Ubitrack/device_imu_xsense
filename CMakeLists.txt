@@ -6,7 +6,7 @@ cmake_minimum_required(VERSION 3.4.0)
 
 include(CheckIncludeFile)
 
-include(${CMAKE_BINARY_DIR}/conanbuildinfo.cmake)
+include(${CMAKE_CURRENT_BINARY_DIR}/conanbuildinfo.cmake)
 conan_basic_setup(TARGETS)
 
 include(GNUInstallDirs)

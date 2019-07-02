@@ -42,6 +42,8 @@
 
 #include <opencv2/opencv.hpp>
 
+#include <utVision/Util/OpenCV.h>
+
 #include <log4cpp/Category.hh>
 
 // get a logger
@@ -79,6 +81,10 @@ bool get_intrinsics_for_stream(std::map<std::string, rs2::stream_profile>& map, 
                 auto height = (std::size_t)intr.height;
 
                 value = Math::CameraIntrinsics<double>(intrinsicMatrix, radial, tangential, width, height);
+
+                // real sense has image origin of 0, ubitrack default is 1, flip needed of cy and tangential parameter needed
+                value = Vision::Util::cv2::correctForOrigin(0, value);
+
                 LOG4CPP_DEBUG(logger, key << " Camera Model: " << value);
                 return true;
             } catch( rs2::error& e) {
