@@ -228,6 +228,7 @@ using namespace Dataflow;
         bool m_haveDepthStream;
 
         Dataflow::PushSupplier <Measurement::ImageMeasurement> m_outputColorImagePort;
+        Dataflow::PushSupplier <Measurement::ImageMeasurement> m_outputGreyImagePort;
         Dataflow::PushSupplier <Measurement::ImageMeasurement> m_outputIRLeftImagePort;
 //        Dataflow::PushSupplier <Measurement::ImageMeasurement> m_outputIRRightImagePort;
         Dataflow::PushSupplier <Measurement::ImageMeasurement> m_outputDepthMapImagePort;

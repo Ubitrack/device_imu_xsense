@@ -214,6 +214,7 @@ namespace Ubitrack { namespace Drivers {
     RealsenseCameraComponent::RealsenseCameraComponent( const std::string& sName, boost::shared_ptr< Graph::UTQLSubgraph > subgraph  )
         : Dataflow::Component( sName )
         , m_outputColorImagePort("ColorImageOutput", *this)
+        , m_outputGreyImagePort("GreyImageOutput", *this)
         , m_outputIRLeftImagePort("IRLeftImageOutput", *this)
 //        , m_outputIRRightImagePort("IRRightImageOutput", *this)
         , m_outputDepthMapImagePort("DepthImageOutput", *this)
@@ -718,6 +719,25 @@ namespace Ubitrack { namespace Drivers {
                             }
                             m_outputColorImagePort.send(Measurement::ImageMeasurement(ts, pColorImage));
                         }
+
+                        if (m_outputGreyImagePort.isConnected()) {
+                            cv::Mat grayImage;
+                            cv::cvtColor(image, grayImage, cv::COLOR_RGB2GRAY);
+                            boost::shared_ptr<Vision::Image> pGreyImage(new Vision::Image(grayImage));
+                            pGreyImage->set_pixelFormat(imageFormatProperties.imageFormat);
+                            pGreyImage->set_origin(imageFormatProperties.origin);
+
+                            if (m_autoGPUUpload) {
+                                Vision::OpenCLManager &oclManager = Vision::OpenCLManager::singleton();
+                                if (oclManager.isInitialized()) {
+                                    //force upload to the GPU
+                                    pGreyImage->uMat();
+                                }
+                            }
+                            m_outputGreyImagePort.send(Measurement::ImageMeasurement(ts, pGreyImage));
+                        }
+
+                        
                     } else {
                         LOG4CPP_WARN(logger, "Expected Video-Frame but cannot cast.");
                     }

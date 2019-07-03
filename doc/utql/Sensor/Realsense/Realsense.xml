@@ -106,6 +106,13 @@
                 <Attribute name="type" value="Image" xsi:type="EnumAttributeReferenceType"/>
                 <Attribute name="mode" value="push" xsi:type="EnumAttributeReferenceType"/>
             </Edge>
+            <Edge name="GreyImageOutput" source="ColorCamera" destination="ColorImagePlane" displayName="Output Grey Image">
+                <Description>
+                    <h:p>The output grey image.</h:p>
+                </Description>
+                <Attribute name="type" value="Image" xsi:type="EnumAttributeReferenceType"/>
+                <Attribute name="mode" value="push" xsi:type="EnumAttributeReferenceType"/>
+            </Edge>
 
             <!--<Edge name="LeftToRightTransform" source="IRCameraLeft" destination="IRCameraRight" displayName="IR Camera Left To Right Transform">-->
                 <!--<Description>-->
@@ -271,6 +278,13 @@
             <Edge name="ColorImageOutput" source="ColorCamera" destination="ColorImagePlane" displayName="Output Color Image">
                 <Description>
                     <h:p>The output image.</h:p>
+                </Description>
+                <Attribute name="type" value="Image" xsi:type="EnumAttributeReferenceType"/>
+                <Attribute name="mode" value="push" xsi:type="EnumAttributeReferenceType"/>
+            </Edge>
+            <Edge name="GreyImageOutput" source="ColorCamera" destination="ColorImagePlane" displayName="Output Grey Image">
+                <Description>
+                    <h:p>The output grey image.</h:p>
                 </Description>
                 <Attribute name="type" value="Image" xsi:type="EnumAttributeReferenceType"/>
                 <Attribute name="mode" value="push" xsi:type="EnumAttributeReferenceType"/>
