@@ -443,6 +443,7 @@ namespace Ubitrack { namespace Drivers {
         }
 
         try {
+            Ubitrack::Util::sleep(2000);
             m_pipeline_profile = m_pipeline_config.resolve(*m_pipeline);
         } catch(rs2::error &e) {
             LOG4CPP_ERROR(logger, "Error while starting pipeline: " << e.what());
