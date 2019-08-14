@@ -36,7 +36,7 @@ class UbitrackCoreConan(ConanFile):
         self.requires("ubitrack_core/%s@%s" % (self.version, userChannel))
         self.requires("ubitrack_vision/%s@%s" % (self.version, userChannel))
         self.requires("ubitrack_dataflow/%s@%s" % (self.version, userChannel))
-        self.requires("librealsense/[>=2.20.0]@camposs/stable")
+        self.requires("librealsense/[>=2.25.0]@camposs/stable")
        
 
     # def imports(self):
