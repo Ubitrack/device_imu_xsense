@@ -126,6 +126,13 @@ bool get_pose_between_streams(std::map<std::string, rs2::stream_profile>& map, c
                     (double)left2color.translation[2]
             );
             value = Math::Pose(ut_quat, ut_trans);
+
+            // in real sense sdk:
+            // pose source:Depth destination:Color retrieves a matrix (D2C) where when you multipl it with a 3D Point in the Depth camera you get the 3d Point in the Color camera
+            // --> the matrix describes the pose from the color camera to the depth camera
+            // inverse needed for ubitrack
+            value = ~value;
+
             LOG4CPP_DEBUG(logger, "IR Left2Color Transform: " << value);
             return true;
         } catch (rs2::error& e) {
